@@ -1,13 +1,15 @@
 using System.ComponentModel;
 using System.Windows;
+using Zara.Desktop.ViewModels;
 
 namespace Zara.Desktop;
 
 public partial class MainWindow : Window
 {
-    public MainWindow()
+    internal MainWindow(MainWindowViewModel viewModel)
     {
         InitializeComponent();
+        DataContext = viewModel;
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -19,13 +21,5 @@ public partial class MainWindow : Window
         }
 
         base.OnClosing(e);
-    }
-
-    private void Exit_Click(object sender, RoutedEventArgs e)
-    {
-        if (System.Windows.Application.Current is App app)
-        {
-            app.RequestExit();
-        }
     }
 }

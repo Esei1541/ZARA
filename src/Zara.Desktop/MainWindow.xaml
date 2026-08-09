@@ -2,40 +2,74 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="ZARA"
-        Width="560"
-        Height="360"
-        MinWidth="480"
-        MinHeight="300"
+        Width="620"
+        Height="440"
+        MinWidth="540"
+        MinHeight="380"
+        Icon="Assets/ZaraIcon.png"
+        Background="#FFF7F8FA"
         WindowStartupLocation="CenterScreen">
-  <Grid Margin="28">
+  <Grid Margin="32">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
-      <RowDefinition Height="16" />
+      <RowDefinition Height="20" />
       <RowDefinition Height="*" />
+      <RowDefinition Height="20" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
-    <StackPanel>
-      <TextBlock FontSize="26" FontWeight="SemiBold" Text="ZARA" />
-      <TextBlock Margin="0,6,0,0" FontSize="16" Text="수면 시간 보호 도구" />
-    </StackPanel>
+    <DockPanel LastChildFill="True">
+      <Border Width="52"
+              Height="52"
+              Margin="0,0,16,0"
+              Padding="8"
+              Background="#FF171A21"
+              CornerRadius="12"
+              DockPanel.Dock="Left">
+        <Image Source="Assets/ZaraIcon.png" Stretch="Uniform" />
+      </Border>
+      <StackPanel VerticalAlignment="Center">
+        <TextBlock FontSize="26" FontWeight="SemiBold" Text="ZARA" />
+        <TextBlock Margin="0,4,0,0" Foreground="#FF4C5563" Text="복구 가능한 오버레이 시연" />
+      </StackPanel>
+    </DockPanel>
 
     <Border Grid.Row="2"
-            Padding="20"
-            Background="#FFF4F7FA"
-            BorderBrush="#FF9AAFC0"
+            Padding="24"
+            Background="White"
+            BorderBrush="#FFD8DDE5"
             BorderThickness="1"
-            CornerRadius="8">
+            CornerRadius="12">
       <StackPanel>
-        <TextBlock FontSize="18" FontWeight="SemiBold" Text="현재 구현: 초기 골격" />
-        <TextBlock Margin="0,12,0,0" TextWrapping="Wrap">
-          현재는 앱 창과 트레이를 표시하는 초기 골격만 구현되어 있으며, 잠금 기능은 아직 구현되지 않았습니다.
-        </TextBlock>
+        <TextBlock FontSize="18" FontWeight="SemiBold" Text="아이콘 클릭 기반 체크포인트 1" />
+        <TextBlock Margin="0,12,0,0"
+                   Foreground="#FF313844"
+                   Text="{Binding StatusText}"
+                   TextWrapping="Wrap" />
+        <Border Margin="0,18,0,0"
+                Padding="14"
+                Background="#FFF2F4F7"
+                CornerRadius="8">
+          <TextBlock Foreground="#FF505966" TextWrapping="Wrap">
+            이 단계는 모든 모니터를 덮는 오버레이와 개발 즉시 해제만 시연합니다.
+            작업 관리자 제한, 전역 입력 억제와 Service는 아직 적용하지 않습니다.
+          </TextBlock>
+        </Border>
       </StackPanel>
     </Border>
 
-    <StackPanel Grid.Row="3" HorizontalAlignment="Right" Orientation="Horizontal">
-      <Button Width="92" Height="32" Click="Exit_Click" Content="종료" />
+    <StackPanel Grid.Row="4" HorizontalAlignment="Right" Orientation="Horizontal">
+      <Button MinWidth="104"
+              Height="36"
+              Margin="0,0,10,0"
+              Command="{Binding ExitCommand}"
+              Content="종료" />
+      <Button MinWidth="156"
+              Height="36"
+              Padding="16,0"
+              Command="{Binding StartLockDemoCommand}"
+              Content="오버레이 시연 시작"
+              FontWeight="SemiBold" />
     </StackPanel>
   </Grid>
 </Window>

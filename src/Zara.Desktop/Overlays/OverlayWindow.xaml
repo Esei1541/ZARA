@@ -1,0 +1,61 @@
+<Window x:Class="Zara.Desktop.Overlays.OverlayWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:ClassModifier="internal"
+        Title="ZARA 오버레이 시연"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        WindowStartupLocation="Manual"
+        ShowInTaskbar="False"
+        ShowActivated="False"
+        Topmost="True"
+        Background="#FF12151C">
+  <Grid>
+    <Border Width="440"
+            Padding="36"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Background="#F2242832"
+            BorderBrush="#FF4B5362"
+            BorderThickness="1"
+            CornerRadius="18">
+      <StackPanel HorizontalAlignment="Center">
+        <Image Width="104"
+               Height="104"
+               Source="/Zara.Desktop;component/Assets/ZaraIcon.png"
+               Stretch="Uniform" />
+        <TextBlock Margin="0,22,0,0"
+                   HorizontalAlignment="Center"
+                   Foreground="White"
+                   FontSize="26"
+                   FontWeight="SemiBold"
+                   Text="ZARA 오버레이 시연" />
+        <TextBlock Margin="0,12,0,0"
+                   HorizontalAlignment="Center"
+                   Foreground="#FFD1D6DE"
+                   Text="현재 화면 사용을 덮고 있습니다."
+                   TextAlignment="Center" />
+        <TextBlock Margin="0,6,0,0"
+                   HorizontalAlignment="Center"
+                   Foreground="#FF929AA7"
+                   Text="작업 관리자 제한과 입력 억제는 아직 적용하지 않습니다."
+                   TextAlignment="Center"
+                   TextWrapping="Wrap" />
+        <Button x:Name="DevelopmentUnlockButton"
+                MinWidth="168"
+                Height="42"
+                Margin="0,28,0,0"
+                Padding="18,0"
+                Click="DevelopmentUnlock_Click"
+                Content="개발 즉시 해제"
+                FontWeight="SemiBold" />
+        <TextBlock x:Name="UnlockErrorText"
+                   Margin="0,14,0,0"
+                   Foreground="#FFFFA6A6"
+                   TextAlignment="Center"
+                   TextWrapping="Wrap"
+                   Visibility="Collapsed" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>
