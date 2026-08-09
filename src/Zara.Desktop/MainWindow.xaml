@@ -1,0 +1,41 @@
+<Window x:Class="Zara.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ZARA"
+        Width="560"
+        Height="360"
+        MinWidth="480"
+        MinHeight="300"
+        WindowStartupLocation="CenterScreen">
+  <Grid Margin="28">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="16" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <StackPanel>
+      <TextBlock FontSize="26" FontWeight="SemiBold" Text="ZARA" />
+      <TextBlock Margin="0,6,0,0" FontSize="16" Text="수면 시간 보호 도구" />
+    </StackPanel>
+
+    <Border Grid.Row="2"
+            Padding="20"
+            Background="#FFF4F7FA"
+            BorderBrush="#FF9AAFC0"
+            BorderThickness="1"
+            CornerRadius="8">
+      <StackPanel>
+        <TextBlock FontSize="18" FontWeight="SemiBold" Text="현재 구현: 초기 골격" />
+        <TextBlock Margin="0,12,0,0" TextWrapping="Wrap">
+          현재는 앱 창과 트레이를 표시하는 초기 골격만 구현되어 있으며, 잠금 기능은 아직 구현되지 않았습니다.
+        </TextBlock>
+      </StackPanel>
+    </Border>
+
+    <StackPanel Grid.Row="3" HorizontalAlignment="Right" Orientation="Horizontal">
+      <Button Width="92" Height="32" Click="Exit_Click" Content="종료" />
+    </StackPanel>
+  </Grid>
+</Window>

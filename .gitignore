@@ -1,0 +1,44 @@
+# .NET 및 Visual Studio
+**/bin/
+**/obj/
+.vs/
+TestResults/
+artifacts/
+*.user
+*.suo
+*.rsuser
+*.userosscache
+*.sln.docstates
+.idea/
+*.sln.iml
+
+# 시험·커버리지·배포 산출물
+*.trx
+*.coverage
+*.coveragexml
+coverage/
+BenchmarkDotNet.Artifacts/
+*.nupkg
+*.snupkg
+publish/
+
+# Markdown 배치 정책: 사용자용 루트 README만 추적한다.
+/docs/
+/AGENTS.md
+**/AGENTS.md
+**/*.md
+!/README.md
+
+# 로컬 에이전트 하네스와 검증 도구
+/scripts/
+
+# 로컬 설정과 비밀
+.env
+.env.*
+!.env.example
+*.pfx
+*.p12
+*.key
+
+# 런타임·사용자 데이터
+/var/
