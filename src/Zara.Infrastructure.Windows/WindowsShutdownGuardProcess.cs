@@ -18,6 +18,9 @@ public static partial class WindowsShutdownGuardProcess
     private static readonly TimeSpan ParentExitQueryGrace = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ParentRecoveryTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan RelaunchRecoveryTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan RelaunchRetryDelay = TimeSpan.FromMilliseconds(500);
+    private static readonly TimeSpan FailedRecoveryCleanupTimeout = TimeSpan.FromSeconds(5);
+    private const int RelaunchAttemptCount = 3;
 
     /// <summary>
     /// Runs shutdown-guard worker mode when the exact internal switch is present.
@@ -149,9 +152,23 @@ public static partial class WindowsShutdownGuardProcess
             ConfigureFirstApplicationShutdownNotification();
             return RunMessageLoop(arguments[1], parentProcess);
         }
+        catch (Exception exception)
+        {
+            TryWriteWorkerFailure(exception);
+            return 3;
+        }
+#pragma warning restore CA1031
+    }
+
+    private static void TryWriteWorkerFailure(Exception exception)
+    {
+#pragma warning disable CA1031 // Worker diagnostics must never replace the stable exit code.
+        try
+        {
+            Console.Error.WriteLine(exception);
+        }
         catch (Exception)
         {
-            return 3;
         }
 #pragma warning restore CA1031
     }
@@ -172,7 +189,7 @@ public static partial class WindowsShutdownGuardProcess
             detectEncodingFromByteOrderMarks: false,
             bufferSize: 1024,
             leaveOpen: true);
-        using var writer = new StreamWriter(
+        var writer = new StreamWriter(
             pipe,
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
             bufferSize: 1024,
@@ -180,37 +197,56 @@ public static partial class WindowsShutdownGuardProcess
         {
             AutoFlush = true,
         };
-        using var window = new ShutdownGuardWindow();
+        try
+        {
+            using var window = new ShutdownGuardWindow();
 
-        writer.WriteLine(ShutdownGuardProtocol.Ready);
-        string? arm = reader.ReadLine();
-        bool fallbackRecoveryRequired = arm switch
-        {
-            ShutdownGuardProtocol.ArmWithFallback => true,
-            ShutdownGuardProtocol.ArmWithoutFallback => false,
-            _ => throw new InvalidOperationException(
-                "The shutdown guard received an invalid arm policy."),
-        };
-        if (arm is null)
-        {
-            return 4;
+            writer.WriteLine(ShutdownGuardProtocol.Ready);
+            string? arm = reader.ReadLine();
+            bool fallbackRecoveryRequired = arm switch
+            {
+                ShutdownGuardProtocol.ArmWithFallback => true,
+                ShutdownGuardProtocol.ArmWithoutFallback => false,
+                _ => throw new InvalidOperationException(
+                    "The shutdown guard received an invalid arm policy."),
+            };
+            if (arm is null)
+            {
+                return 4;
+            }
+
+            Task<int> protocolTask = ObserveSessionResultAsync(
+                reader,
+                writer,
+                window,
+                parentProcess,
+                fallbackRecoveryRequired);
+            _ = protocolTask.ContinueWith(
+                static (_, state) => ((ShutdownGuardWindow)state!).RequestMessageLoopExit(),
+                window,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+
+            System.Windows.Forms.Application.Run();
+            return protocolTask.GetAwaiter().GetResult();
         }
+        finally
+        {
+            DisposeParentWriter(writer);
+        }
+    }
 
-        Task<int> protocolTask = ObserveSessionResultAsync(
-            reader,
-            writer,
-            window,
-            parentProcess,
-            fallbackRecoveryRequired);
-        _ = protocolTask.ContinueWith(
-            static (_, state) => ((ShutdownGuardWindow)state!).RequestMessageLoopExit(),
-            window,
-            CancellationToken.None,
-            TaskContinuationOptions.ExecuteSynchronously,
-            TaskScheduler.Default);
-
-        System.Windows.Forms.Application.Run();
-        return protocolTask.GetAwaiter().GetResult();
+    private static void DisposeParentWriter(StreamWriter writer)
+    {
+        try
+        {
+            writer.Dispose();
+        }
+        catch (IOException)
+        {
+            // The parent channel is expected to be broken when WPF exits during shutdown.
+        }
     }
 
     private static async Task<int> ObserveSessionResultAsync(
@@ -220,7 +256,7 @@ public static partial class WindowsShutdownGuardProcess
         Process parentProcess,
         bool fallbackRecoveryRequired)
     {
-        Task<string?> parentMessage = reader.ReadLineAsync();
+        Task<ParentMessageRead> parentMessage = ReadParentMessageAsync(reader);
         Task<bool> sessionEnd = window.SessionEnd;
         while (true)
         {
@@ -228,14 +264,24 @@ public static partial class WindowsShutdownGuardProcess
 
             if (completed == parentMessage)
             {
-                string? message = await parentMessage.ConfigureAwait(false);
+                ParentMessageRead parentRead = await parentMessage.ConfigureAwait(false);
+                if (!parentRead.IsAvailable)
+                {
+                    return await RecoverAfterParentBecameUnavailableAsync(
+                            window,
+                            parentProcess,
+                            fallbackRecoveryRequired)
+                        .ConfigureAwait(false);
+                }
+
+                string message = parentRead.Message;
                 if (string.Equals(
                         message,
                         ShutdownGuardProtocol.SuppressFallback,
                         StringComparison.Ordinal))
                 {
                     fallbackRecoveryRequired = false;
-                    parentMessage = reader.ReadLineAsync();
+                    parentMessage = ReadParentMessageAsync(reader);
                     continue;
                 }
 
@@ -244,32 +290,13 @@ public static partial class WindowsShutdownGuardProcess
                     return 0;
                 }
 
-                if (message is not null)
-                {
-                    return 5;
-                }
-
-                bool? endResult = await WaitForSessionResultAfterParentExitAsync(window)
-                    .ConfigureAwait(false);
-                if (endResult is null || endResult.Value || !fallbackRecoveryRequired)
-                {
-                    return 0;
-                }
-
-                if (!await WaitForExactParentExitAsync(parentProcess).ConfigureAwait(false))
-                {
-                    return 8;
-                }
-
-                return await LaunchRecoveryProcessAsync().ConfigureAwait(false) ? 0 : 6;
+                return 5;
             }
 
             bool sessionIsEnding = await sessionEnd.ConfigureAwait(false);
             if (sessionIsEnding)
             {
-                await writer
-                    .WriteLineAsync(ShutdownGuardProtocol.SessionEnding)
-                    .ConfigureAwait(false);
+                await TryNotifyParentSessionIsEndingAsync(writer).ConfigureAwait(false);
                 return 0;
             }
 
@@ -292,20 +319,21 @@ public static partial class WindowsShutdownGuardProcess
 
             if (parentRecovery.Outcome == ParentRecoveryOutcome.Failed)
             {
-                string? parentDecision = await reader.ReadLineAsync().ConfigureAwait(false);
+                ParentMessageRead parentDecision = await ReadParentMessageAsync(reader)
+                    .ConfigureAwait(false);
                 if (string.Equals(
-                        parentDecision,
+                        parentDecision.Message,
                         ShutdownGuardProtocol.SuppressFallback,
                         StringComparison.Ordinal) ||
                     string.Equals(
-                        parentDecision,
+                        parentDecision.Message,
                         ShutdownGuardProtocol.Disarm,
                         StringComparison.Ordinal))
                 {
                     return 7;
                 }
 
-                if (parentDecision is not null)
+                if (parentDecision.IsAvailable)
                 {
                     return 5;
                 }
@@ -318,6 +346,65 @@ public static partial class WindowsShutdownGuardProcess
 
             return await LaunchRecoveryProcessAsync().ConfigureAwait(false) ? 0 : 6;
         }
+    }
+
+    private static async Task<int> RecoverAfterParentBecameUnavailableAsync(
+        ShutdownGuardWindow window,
+        Process parentProcess,
+        bool fallbackRecoveryRequired)
+    {
+        bool? endResult = await WaitForSessionResultAfterParentExitAsync(window)
+            .ConfigureAwait(false);
+        if (endResult is true)
+        {
+            return 0;
+        }
+
+        if (!fallbackRecoveryRequired)
+        {
+            return 0;
+        }
+
+        if (!await WaitForExactParentExitAsync(parentProcess).ConfigureAwait(false))
+        {
+            return 8;
+        }
+
+        return await LaunchRecoveryProcessAsync().ConfigureAwait(false) ? 0 : 6;
+    }
+
+    private static async Task<ParentMessageRead> ReadParentMessageAsync(StreamReader reader)
+    {
+        try
+        {
+            string? message = await reader.ReadLineAsync().ConfigureAwait(false);
+            return message is null
+                ? ParentMessageRead.Unavailable
+                : new ParentMessageRead(message, IsAvailable: true);
+        }
+        catch (IOException)
+        {
+            return ParentMessageRead.Unavailable;
+        }
+        catch (ObjectDisposedException)
+        {
+            return ParentMessageRead.Unavailable;
+        }
+    }
+
+    private static async Task TryNotifyParentSessionIsEndingAsync(StreamWriter writer)
+    {
+#pragma warning disable CA1031 // The parent may already be gone during successful Windows shutdown.
+        try
+        {
+            await writer
+                .WriteLineAsync(ShutdownGuardProtocol.SessionEnding)
+                .ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+        }
+#pragma warning restore CA1031
     }
 
     private static async Task<bool?> WaitForSessionResultAfterParentExitAsync(
@@ -341,7 +428,7 @@ public static partial class WindowsShutdownGuardProcess
     }
 
     private static async Task<ParentRecoveryAttempt> TryRecoverThroughParentAsync(
-        Task<string?> pendingParentMessage,
+        Task<ParentMessageRead> pendingParentMessage,
         StreamReader reader,
         StreamWriter writer,
         bool fallbackRecoveryRequired)
@@ -350,19 +437,27 @@ public static partial class WindowsShutdownGuardProcess
         try
         {
             await writer.WriteLineAsync(ShutdownGuardProtocol.Cancelled).ConfigureAwait(false);
-            Task<string?> nextMessage = pendingParentMessage;
+            Task<ParentMessageRead> nextMessage = pendingParentMessage;
             while (true)
             {
-                string? acknowledgement = await nextMessage
+                ParentMessageRead parentRead = await nextMessage
                     .WaitAsync(ParentRecoveryTimeout)
                     .ConfigureAwait(false);
+                if (!parentRead.IsAvailable)
+                {
+                    return new ParentRecoveryAttempt(
+                        ParentRecoveryOutcome.Unavailable,
+                        fallbackRecoveryRequired);
+                }
+
+                string acknowledgement = parentRead.Message;
                 if (string.Equals(
                         acknowledgement,
                         ShutdownGuardProtocol.SuppressFallback,
                         StringComparison.Ordinal))
                 {
                     fallbackRecoveryRequired = false;
-                    nextMessage = reader.ReadLineAsync();
+                    nextMessage = ReadParentMessageAsync(reader);
                     continue;
                 }
 
@@ -450,72 +545,190 @@ public static partial class WindowsShutdownGuardProcess
             return false;
         }
 
-        string pipeName = $"zara-recovery-{Guid.NewGuid():N}";
-        string token = Guid.NewGuid().ToString("N");
-        using Process workerProcess = Process.GetCurrentProcess();
-        using var pipe = new NamedPipeServerStream(
-            pipeName,
-            PipeDirection.InOut,
-            maxNumberOfServerInstances: 1,
-            PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        var startInfo = new ProcessStartInfo
+        return await ExecuteRecoveryLaunchRetryAsync(
+                () => TryLaunchRecoveryProcessOnceAsync(executablePath),
+                RelaunchAttemptCount,
+                RelaunchRetryDelay,
+                static delay => Task.Delay(delay))
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Executes bounded recovery launches serially and retries only after the preceding attempt has
+    /// confirmed that no failed child remains alive.
+    /// </summary>
+    /// <param name="launchAttempt">
+    /// Runs one recovery launch and reports its cleanup-safe outcome. An exception is not considered
+    /// retryable because it does not prove that a started child has been stopped.
+    /// </param>
+    /// <param name="attemptCount">The maximum number of launch attempts.</param>
+    /// <param name="retryDelay">The delay inserted before each retry after the first attempt.</param>
+    /// <param name="delayAsync">Waits for the configured retry delay.</param>
+    /// <returns><see langword="true" /> only when one attempt acknowledges recovery.</returns>
+    internal static async Task<bool> ExecuteRecoveryLaunchRetryAsync(
+        Func<Task<RecoveryAttemptOutcome>> launchAttempt,
+        int attemptCount,
+        TimeSpan retryDelay,
+        Func<TimeSpan, Task> delayAsync)
+    {
+        ArgumentNullException.ThrowIfNull(launchAttempt);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(attemptCount);
+        if (retryDelay < TimeSpan.Zero)
         {
-            FileName = executablePath,
-            WorkingDirectory = Path.GetDirectoryName(executablePath) ?? AppContext.BaseDirectory,
-            UseShellExecute = false,
-        };
-        startInfo.ArgumentList.Add(ShutdownGuardProtocol.RecoverySwitch);
-        startInfo.ArgumentList.Add(pipeName);
-        startInfo.ArgumentList.Add(token);
-        startInfo.ArgumentList.Add(workerProcess.Id.ToString(CultureInfo.InvariantCulture));
-        startInfo.ArgumentList.Add(
-            workerProcess.StartTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture));
-        using Process? recoveryProcess = Process.Start(startInfo);
-        if (recoveryProcess is null)
-        {
-            return false;
+            throw new ArgumentOutOfRangeException(
+                nameof(retryDelay),
+                retryDelay,
+                "The recovery retry delay cannot be negative.");
         }
 
-#pragma warning disable CA1031 // A failed readiness handshake is reported as recovery failure.
-        try
+        ArgumentNullException.ThrowIfNull(delayAsync);
+
+        for (int attempt = 0; attempt < attemptCount; attempt++)
         {
-            using var handshakeCancellation = new CancellationTokenSource(RelaunchRecoveryTimeout);
-            await pipe.WaitForConnectionAsync(handshakeCancellation.Token).ConfigureAwait(false);
-            using var reader = new StreamReader(
-                pipe,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                detectEncodingFromByteOrderMarks: false,
-                bufferSize: 1024,
-                leaveOpen: true);
-            using var writer = new StreamWriter(
-                pipe,
-                new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
-                bufferSize: 1024,
-                leaveOpen: true)
+            if (attempt > 0)
             {
-                AutoFlush = true,
-            };
-            string? suppliedToken = await reader
-                .ReadLineAsync(handshakeCancellation.Token)
-                .ConfigureAwait(false);
-            if (!string.Equals(suppliedToken, token, StringComparison.Ordinal))
+                await delayAsync(retryDelay).ConfigureAwait(false);
+            }
+
+            RecoveryAttemptOutcome outcome = await launchAttempt().ConfigureAwait(false);
+
+            if (outcome == RecoveryAttemptOutcome.Recovered)
+            {
+                return true;
+            }
+
+            if (outcome == RecoveryAttemptOutcome.FailedChildStillRunning)
             {
                 return false;
             }
+        }
 
-            await writer.WriteLineAsync(ShutdownGuardProtocol.Restore).ConfigureAwait(false);
-            string? recoveryResult = await reader
-                .ReadLineAsync(handshakeCancellation.Token)
-                .ConfigureAwait(false);
-            return string.Equals(
-                recoveryResult,
-                ShutdownGuardProtocol.Recovered,
-                StringComparison.Ordinal);
+        return false;
+    }
+
+    private static async Task<RecoveryAttemptOutcome> TryLaunchRecoveryProcessOnceAsync(
+        string executablePath)
+    {
+        Process? recoveryProcess = null;
+        bool recovered = false;
+        RecoveryAttemptOutcome outcome = RecoveryAttemptOutcome.RetryableFailure;
+
+#pragma warning disable CA1031 // Each bounded attempt is followed by exact child cleanup before retry.
+        try
+        {
+            string pipeName = $"zara-recovery-{Guid.NewGuid():N}";
+            string token = Guid.NewGuid().ToString("N");
+            using Process workerProcess = Process.GetCurrentProcess();
+            using var pipe = new NamedPipeServerStream(
+                pipeName,
+                PipeDirection.InOut,
+                maxNumberOfServerInstances: 1,
+                PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = executablePath,
+                WorkingDirectory = Path.GetDirectoryName(executablePath) ?? AppContext.BaseDirectory,
+                UseShellExecute = false,
+            };
+            startInfo.ArgumentList.Add(ShutdownGuardProtocol.RecoverySwitch);
+            startInfo.ArgumentList.Add(pipeName);
+            startInfo.ArgumentList.Add(token);
+            startInfo.ArgumentList.Add(workerProcess.Id.ToString(CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add(
+                workerProcess.StartTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture));
+            recoveryProcess = Process.Start(startInfo);
+            if (recoveryProcess is not null)
+            {
+                using var handshakeCancellation =
+                    new CancellationTokenSource(RelaunchRecoveryTimeout);
+                await pipe.WaitForConnectionAsync(handshakeCancellation.Token).ConfigureAwait(false);
+                using var reader = new StreamReader(
+                    pipe,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    detectEncodingFromByteOrderMarks: false,
+                    bufferSize: 1024,
+                    leaveOpen: true);
+                using var writer = new StreamWriter(
+                    pipe,
+                    new UTF8Encoding(encoderShouldEmitUTF8Identifier: false),
+                    bufferSize: 1024,
+                    leaveOpen: true)
+                {
+                    AutoFlush = true,
+                };
+                string? suppliedToken = await reader
+                    .ReadLineAsync(handshakeCancellation.Token)
+                    .ConfigureAwait(false);
+                if (string.Equals(suppliedToken, token, StringComparison.Ordinal))
+                {
+                    await writer.WriteLineAsync(ShutdownGuardProtocol.Restore).ConfigureAwait(false);
+                    string? recoveryResult = await reader
+                        .ReadLineAsync(handshakeCancellation.Token)
+                        .ConfigureAwait(false);
+                    recovered = string.Equals(
+                        recoveryResult,
+                        ShutdownGuardProtocol.Recovered,
+                        StringComparison.Ordinal);
+                    if (recovered)
+                    {
+                        outcome = RecoveryAttemptOutcome.Recovered;
+                    }
+                }
+            }
         }
         catch (Exception)
         {
-            return false;
+        }
+
+        if (!recovered && recoveryProcess is not null)
+        {
+            bool stopped = await StopFailedRecoveryProcessAsync(recoveryProcess)
+                .ConfigureAwait(false);
+            if (!stopped)
+            {
+                outcome = RecoveryAttemptOutcome.FailedChildStillRunning;
+            }
+        }
+
+        recoveryProcess?.Dispose();
+        return outcome;
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// Stops the exact recovery child returned by <see cref="Process.Start(ProcessStartInfo)" /> and
+    /// verifies its exit before another recovery attempt can begin.
+    /// </summary>
+    /// <param name="recoveryProcess">The exact child process owned by the failed attempt.</param>
+    /// <returns><see langword="true" /> only when the child is confirmed stopped.</returns>
+    internal static async Task<bool> StopFailedRecoveryProcessAsync(Process recoveryProcess)
+    {
+#pragma warning disable CA1031 // Failure to verify exact cleanup must stop retries to avoid duplicates.
+        try
+        {
+            if (recoveryProcess.HasExited)
+            {
+                return true;
+            }
+
+            recoveryProcess.Kill(entireProcessTree: false);
+            await recoveryProcess
+                .WaitForExitAsync()
+                .WaitAsync(FailedRecoveryCleanupTimeout)
+                .ConfigureAwait(false);
+            return recoveryProcess.HasExited;
+        }
+        catch (Exception)
+        {
+            try
+            {
+                return recoveryProcess.HasExited;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
 #pragma warning restore CA1031
     }
@@ -597,6 +810,18 @@ public static partial class WindowsShutdownGuardProcess
         Recovered,
         Failed,
         Unavailable,
+    }
+
+    internal enum RecoveryAttemptOutcome
+    {
+        Recovered,
+        RetryableFailure,
+        FailedChildStillRunning,
+    }
+
+    private readonly record struct ParentMessageRead(string Message, bool IsAvailable)
+    {
+        internal static ParentMessageRead Unavailable { get; } = new(string.Empty, IsAvailable: false);
     }
 
     private sealed record ParentRecoveryAttempt(

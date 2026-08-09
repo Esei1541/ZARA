@@ -63,7 +63,7 @@ internal sealed partial class OverlayWindow : Window
     {
         MessageBoxResult result = System.Windows.MessageBox.Show(
             this,
-            "시스템을 종료하면 저장되지 않은 작업이 손실될 수 있습니다. 계속하시겠습니까?",
+            "정말로 종료하시겠습니까?",
             "시스템 종료",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,

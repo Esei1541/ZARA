@@ -5,4 +5,5 @@
   <Project Path="src/Zara.Desktop/Zara.Desktop.csproj" />
   <Project Path="tests/Zara.Core.Tests/Zara.Core.Tests.csproj" />
   <Project Path="tests/Zara.Application.Tests/Zara.Application.Tests.csproj" />
+  <Project Path="tests/Zara.Infrastructure.Windows.Tests/Zara.Infrastructure.Windows.Tests.csproj" />
 </Solution>

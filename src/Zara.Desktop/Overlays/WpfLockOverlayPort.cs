@@ -221,6 +221,10 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         }
 
         window.DpiChanged += (_, _) => ScheduleReconcile();
+        window.Loaded += (_, _) => ScheduleReconcile();
+        window.ContentRendered += (_, _) => ScheduleReconcile();
+        window.LocationChanged += (_, _) => ScheduleReconcile();
+        window.SizeChanged += (_, _) => ScheduleReconcile();
         window.Closed += (_, _) => OnOverlayClosed(deviceName, window);
         return window;
     }
@@ -228,11 +232,13 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     private void PositionWindow(OverlayWindow window, PixelBounds pixelBounds)
     {
         nint handle = new WindowInteropHelper(window).EnsureHandle();
-        _windowPositioner.PositionTopmostNoActivate(handle, pixelBounds);
 
         if (!window.IsVisible)
         {
+            _windowPositioner.PositionTopmostNoActivate(handle, pixelBounds);
             window.Show();
+            _windowPositioner.PositionTopmostNoActivate(handle, pixelBounds);
+            return;
         }
 
         _windowPositioner.PositionTopmostNoActivate(handle, pixelBounds);
