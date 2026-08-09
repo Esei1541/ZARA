@@ -21,6 +21,88 @@ public sealed class LockRuntimeUseCaseTests
         using var useCase = new LockRuntimeUseCase(new RecordingOverlayPort());
 
         Assert.AreEqual(RuntimeState.Initial, useCase.CurrentState);
+        Assert.AreEqual(
+            new LockIntentSnapshot(LockState.Unlocked, Revision: 0),
+            useCase.CurrentIntent);
+    }
+
+    [TestMethod]
+    public async Task ExplicitIntentRequestsAdvanceRevisionEvenWhenProjectionIsAlreadySatisfied()
+    {
+        using var useCase = new LockRuntimeUseCase(new RecordingOverlayPort());
+
+        await useCase.RequestLockAsync();
+        await useCase.RequestLockAsync();
+        await useCase.RequestDevelopmentUnlockAsync();
+
+        Assert.AreEqual(
+            new LockIntentSnapshot(LockState.Unlocked, Revision: 3),
+            useCase.CurrentIntent);
+    }
+
+    [TestMethod]
+    public async Task FailedProjectionStillAdvancesRequestedIntentRevision()
+    {
+        var port = new RecordingOverlayPort
+        {
+            ShowOperation = _ => Task.FromException(new InvalidOperationException("Show failed.")),
+        };
+        using var useCase = new LockRuntimeUseCase(port);
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => useCase.RequestLockAsync());
+
+        Assert.AreEqual(
+            new LockIntentSnapshot(LockState.Locked, Revision: 1),
+            useCase.CurrentIntent);
+    }
+
+    [TestMethod]
+    public async Task RestoreLockIfIntentRevisionAsyncWhenRevisionMatchesRestoresAndAdvancesIntent()
+    {
+        var port = new RecordingOverlayPort();
+        using var useCase = new LockRuntimeUseCase(port);
+        await useCase.RequestLockAsync();
+        await useCase.RequestDevelopmentUnlockAsync();
+
+        bool restored = await useCase.RestoreLockIfIntentRevisionAsync(expectedIntentRevision: 2);
+
+        Assert.IsTrue(restored);
+        Assert.AreEqual(
+            new LockIntentSnapshot(LockState.Locked, Revision: 3),
+            useCase.CurrentIntent);
+        Assert.AreEqual(2, port.ShowCallCount);
+    }
+
+    [TestMethod]
+    public async Task RestoreLockIfIntentRevisionAsyncWhenRevisionIsStaleDoesNotChangeIntent()
+    {
+        var port = new RecordingOverlayPort();
+        using var useCase = new LockRuntimeUseCase(port);
+        await useCase.RequestLockAsync();
+        await useCase.RequestDevelopmentUnlockAsync();
+
+        bool restored = await useCase.RestoreLockIfIntentRevisionAsync(expectedIntentRevision: 1);
+
+        Assert.IsFalse(restored);
+        Assert.AreEqual(
+            new LockIntentSnapshot(LockState.Unlocked, Revision: 2),
+            useCase.CurrentIntent);
+        Assert.AreEqual(1, port.ShowCallCount);
+        Assert.AreEqual(1, port.HideCallCount);
+    }
+
+    [TestMethod]
+    public async Task ProjectionInvalidationDoesNotAdvanceIntentRevision()
+    {
+        using var useCase = new LockRuntimeUseCase(new RecordingOverlayPort());
+        await useCase.RequestLockAsync();
+
+        await useCase.ReportOverlayProjectionInvalidatedAsync(OverlayVisibility.Visible);
+
+        Assert.AreEqual(
+            new LockIntentSnapshot(LockState.Locked, Revision: 1),
+            useCase.CurrentIntent);
     }
 
     [TestMethod]
@@ -230,6 +312,33 @@ public sealed class LockRuntimeUseCaseTests
         var useCase = new LockRuntimeUseCase(new RecordingOverlayPort());
         useCase.Dispose();
 
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(
+            () => useCase.RequestLockAsync());
+    }
+
+    [TestMethod]
+    public async Task DisposeDuringInFlightRequestDoesNotReplaceItsResult()
+    {
+        var showStarted = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseShow = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var port = new RecordingOverlayPort
+        {
+            ShowOperation = async cancellationToken =>
+            {
+                showStarted.TrySetResult(true);
+                await releaseShow.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            },
+        };
+        var useCase = new LockRuntimeUseCase(port);
+        Task request = useCase.RequestLockAsync();
+        await showStarted.Task;
+
+        useCase.Dispose();
+        releaseShow.TrySetResult(true);
+
+        await request;
         await Assert.ThrowsExactlyAsync<ObjectDisposedException>(
             () => useCase.RequestLockAsync());
     }

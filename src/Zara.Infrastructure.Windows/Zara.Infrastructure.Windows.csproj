@@ -6,4 +6,8 @@
     <AssemblyName>Zara.Infrastructure.Windows</AssemblyName>
     <RootNamespace>Zara.Infrastructure.Windows</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Zara.Application\Zara.Application.csproj" />
+  </ItemGroup>
 </Project>

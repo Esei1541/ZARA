@@ -14,9 +14,12 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly WindowsDisplayTopology _displayTopology;
     private readonly INativeWindowPositioner _windowPositioner;
+    private readonly bool _showDevelopmentSafetyControls;
     private readonly Dictionary<string, OverlayWindow> _windows =
         new(StringComparer.OrdinalIgnoreCase);
+    private Func<Task>? _requestSystemShutdown;
     private Func<Task>? _requestDevelopmentUnlock;
+    private string? _pendingOperationError;
     private bool _maintainVisibleProjection;
     private bool _topologySubscribed;
     private bool _disposed;
@@ -25,14 +28,28 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     internal WpfLockOverlayPort(
         Dispatcher dispatcher,
         WindowsDisplayTopology displayTopology,
-        INativeWindowPositioner windowPositioner)
+        INativeWindowPositioner windowPositioner,
+        bool showDevelopmentSafetyControls)
     {
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _displayTopology = displayTopology ?? throw new ArgumentNullException(nameof(displayTopology));
         _windowPositioner = windowPositioner ?? throw new ArgumentNullException(nameof(windowPositioner));
+        _showDevelopmentSafetyControls = showDevelopmentSafetyControls;
     }
 
     internal event EventHandler<OverlayProjectionFaultEventArgs>? ProjectionFaulted;
+
+    internal void SetSystemShutdownHandler(Func<Task> requestSystemShutdown)
+    {
+        ArgumentNullException.ThrowIfNull(requestSystemShutdown);
+
+        if (_requestSystemShutdown is not null)
+        {
+            throw new InvalidOperationException("The system shutdown handler is already configured.");
+        }
+
+        _requestSystemShutdown = requestSystemShutdown;
+    }
 
     internal void SetDevelopmentUnlockHandler(Func<Task> requestDevelopmentUnlock)
     {
@@ -44,6 +61,39 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         }
 
         _requestDevelopmentUnlock = requestDevelopmentUnlock;
+    }
+
+    internal void ReportOperationFailure(string message)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        ThrowIfDisposed();
+
+        _pendingOperationError = message;
+        foreach (OverlayWindow window in _windows.Values)
+        {
+            window.ShowOperationError(message);
+        }
+    }
+
+    internal void ClearOperationError()
+    {
+        ThrowIfDisposed();
+
+        _pendingOperationError = null;
+        foreach (OverlayWindow window in _windows.Values)
+        {
+            window.ClearOperationError();
+        }
+    }
+
+    internal void SetSystemShutdownEnabled(bool isEnabled)
+    {
+        ThrowIfDisposed();
+
+        foreach (OverlayWindow window in _windows.Values)
+        {
+            window.SetSystemShutdownEnabled(isEnabled);
+        }
     }
 
     public Task ShowAllAsync(CancellationToken cancellationToken) =>
@@ -161,7 +211,15 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
 
     private OverlayWindow CreateOverlayWindow(string deviceName)
     {
-        var window = new OverlayWindow(RequestDevelopmentUnlockAsync);
+        var window = new OverlayWindow(
+            RequestSystemShutdownAsync,
+            RequestDevelopmentUnlockAsync,
+            _showDevelopmentSafetyControls);
+        if (_pendingOperationError is not null)
+        {
+            window.ShowOperationError(_pendingOperationError);
+        }
+
         window.DpiChanged += (_, _) => ScheduleReconcile();
         window.Closed += (_, _) => OnOverlayClosed(deviceName, window);
         return window;
@@ -184,6 +242,13 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     {
         Func<Task> handler = _requestDevelopmentUnlock ??
             throw new InvalidOperationException("The development unlock handler is not configured.");
+        return handler();
+    }
+
+    private Task RequestSystemShutdownAsync()
+    {
+        Func<Task> handler = _requestSystemShutdown ??
+            throw new InvalidOperationException("The system shutdown handler is not configured.");
         return handler();
     }
 
@@ -313,7 +378,9 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         _maintainVisibleProjection = false;
         UnsubscribeTopology();
         CloseAllWindowsCore();
+        _requestSystemShutdown = null;
         _requestDevelopmentUnlock = null;
+        _pendingOperationError = null;
         ProjectionFaulted = null;
         _disposed = true;
     }

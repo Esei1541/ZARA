@@ -51,7 +51,7 @@
                 Background="#FFF2F4F7"
                 CornerRadius="8">
           <TextBlock Foreground="#FF505966" TextWrapping="Wrap">
-            이 단계는 모든 모니터를 덮는 오버레이와 개발 즉시 해제만 시연합니다.
+            이 단계는 모든 모니터를 덮는 오버레이만 시연합니다.
             작업 관리자 제한, 전역 입력 억제와 Service는 아직 적용하지 않습니다.
           </TextBlock>
         </Border>

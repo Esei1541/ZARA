@@ -15,7 +15,10 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
 {
     private readonly ILockOverlayPort _overlayPort;
     private readonly SemaphoreSlim _requestGate = new(1, 1);
-    private RuntimeState _currentState = RuntimeState.Initial;
+    private RuntimeSnapshot _currentSnapshot = new(
+        RuntimeState.Initial,
+        DesiredIntent: LockState.Unlocked,
+        IntentRevision: 0);
     private int _disposed;
 
     /// <summary>
@@ -29,15 +32,38 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
     }
 
     /// <inheritdoc />
-    public RuntimeState CurrentState => Volatile.Read(ref _currentState);
+    public RuntimeState CurrentState => Volatile.Read(ref _currentSnapshot).State;
+
+    /// <inheritdoc />
+    public LockIntentSnapshot CurrentIntent
+    {
+        get
+        {
+            RuntimeSnapshot snapshot = Volatile.Read(ref _currentSnapshot);
+            return new LockIntentSnapshot(snapshot.DesiredIntent, snapshot.IntentRevision);
+        }
+    }
 
     /// <inheritdoc />
     public Task RequestLockAsync(CancellationToken cancellationToken = default) =>
-        DispatchAsync(new LockRequested(), cancellationToken);
+        DispatchIntentAsync(new LockRequested(), cancellationToken);
 
     /// <inheritdoc />
     public Task RequestDevelopmentUnlockAsync(CancellationToken cancellationToken = default) =>
-        DispatchAsync(new SafetyUnlockRequested(), cancellationToken);
+        DispatchIntentAsync(new SafetyUnlockRequested(), cancellationToken);
+
+    /// <inheritdoc />
+    public Task<bool> RestoreLockIfIntentRevisionAsync(
+        long expectedIntentRevision,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(expectedIntentRevision);
+        return DispatchCoreAsync(
+            new LockRequested(),
+            requestedIntent: LockState.Locked,
+            expectedIntentRevision,
+            cancellationToken);
+    }
 
     /// <inheritdoc />
     public Task ReportOverlayProjectionInvalidatedAsync(
@@ -48,7 +74,7 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
     /// <inheritdoc />
     public async Task PrepareForExitAsync(CancellationToken cancellationToken = default)
     {
-        await DispatchAsync(new SafetyUnlockRequested(), cancellationToken).ConfigureAwait(false);
+        await DispatchIntentAsync(new SafetyUnlockRequested(), cancellationToken).ConfigureAwait(false);
 
         if (CurrentState.OverlayProjection != OverlayProjectionState.Hidden)
         {
@@ -58,7 +84,7 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
     }
 
     /// <summary>
-    /// Releases the request-serialization resource owned by this use case.
+    /// Prevents new requests while allowing an already serialized request to release its gate.
     /// </summary>
     public void Dispose()
     {
@@ -67,11 +93,44 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
             return;
         }
 
-        _requestGate.Dispose();
+        // SemaphoreSlim is intentionally left for GC. Disposing it here can race an in-flight
+        // request whose finally block must still release the gate without replacing its result.
         GC.SuppressFinalize(this);
     }
 
     private async Task DispatchAsync(RuntimeEvent runtimeEvent, CancellationToken cancellationToken)
+    {
+        await DispatchCoreAsync(
+                runtimeEvent,
+                requestedIntent: null,
+                expectedIntentRevision: null,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task DispatchIntentAsync(
+        RuntimeEvent runtimeEvent,
+        CancellationToken cancellationToken)
+    {
+        await DispatchCoreAsync(
+                runtimeEvent,
+                requestedIntent: runtimeEvent switch
+                {
+                    LockRequested => LockState.Locked,
+                    SafetyUnlockRequested => LockState.Unlocked,
+                    _ => throw new InvalidOperationException(
+                        $"Unsupported intent event: {runtimeEvent.GetType().FullName}"),
+                },
+                expectedIntentRevision: null,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<bool> DispatchCoreAsync(
+        RuntimeEvent runtimeEvent,
+        LockState? requestedIntent,
+        long? expectedIntentRevision,
+        CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         await _requestGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -79,7 +138,26 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
         try
         {
             ThrowIfDisposed();
+            RuntimeSnapshot snapshot = Volatile.Read(ref _currentSnapshot);
+            if (expectedIntentRevision is long expectedRevision &&
+                snapshot.IntentRevision != expectedRevision)
+            {
+                return false;
+            }
+
+            if (requestedIntent is LockState nextIntent)
+            {
+                Volatile.Write(
+                    ref _currentSnapshot,
+                    snapshot with
+                    {
+                        DesiredIntent = nextIntent,
+                        IntentRevision = checked(snapshot.IntentRevision + 1),
+                    });
+            }
+
             await ProcessEventsAsync(runtimeEvent, cancellationToken).ConfigureAwait(false);
+            return true;
         }
         finally
         {
@@ -97,8 +175,11 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
 
         while (pendingEvents.TryDequeue(out var runtimeEvent))
         {
-            var transition = RuntimeReducer.Reduce(CurrentState, runtimeEvent);
-            Volatile.Write(ref _currentState, transition.NextState);
+            RuntimeSnapshot snapshot = Volatile.Read(ref _currentSnapshot);
+            var transition = RuntimeReducer.Reduce(snapshot.State, runtimeEvent);
+            Volatile.Write(
+                ref _currentSnapshot,
+                snapshot with { State = transition.NextState });
 
             foreach (var effect in transition.Effects)
             {
@@ -135,4 +216,9 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
 
     private void ThrowIfDisposed() =>
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+
+    private sealed record RuntimeSnapshot(
+        RuntimeState State,
+        LockState DesiredIntent,
+        long IntentRevision);
 }

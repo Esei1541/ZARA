@@ -3,6 +3,15 @@ using Zara.Core.Runtime;
 namespace Zara.Application.Locking;
 
 /// <summary>
+/// Identifies the latest requested lock intent independently of adapter projection results.
+/// </summary>
+/// <param name="DesiredLock">The lock state requested by the latest intent.</param>
+/// <param name="Revision">
+/// A monotonically increasing value changed by every explicit lock, safety-unlock, or exit intent.
+/// </param>
+public sealed record LockIntentSnapshot(LockState DesiredLock, long Revision);
+
+/// <summary>
 /// Coordinates lock requests with the external overlay projection.
 /// </summary>
 public interface ILockRuntimeUseCase
@@ -11,6 +20,11 @@ public interface ILockRuntimeUseCase
     /// Gets the latest runtime state, including the last confirmed overlay projection.
     /// </summary>
     RuntimeState CurrentState { get; }
+
+    /// <summary>
+    /// Gets an atomic snapshot of the latest requested lock intent and its revision.
+    /// </summary>
+    LockIntentSnapshot CurrentIntent { get; }
 
     /// <summary>
     /// Requests the default lock and waits for its overlay effect to finish.
@@ -25,6 +39,21 @@ public interface ILockRuntimeUseCase
     /// <param name="cancellationToken">Cancels the pending request.</param>
     /// <returns>A task that completes after all effects produced by the request finish.</returns>
     Task RequestDevelopmentUnlockAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Restores the lock only when no newer intent has replaced the expected revision.
+    /// </summary>
+    /// <param name="expectedIntentRevision">
+    /// The exact intent revision that must still be current before restoration begins.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the pending conditional request.</param>
+    /// <returns>
+    /// <see langword="true"/> when the restoration request was accepted and its effects completed;
+    /// <see langword="false"/> when a newer intent made the restoration obsolete.
+    /// </returns>
+    Task<bool> RestoreLockIfIntentRevisionAsync(
+        long expectedIntentRevision,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Records that an adapter can no longer guarantee a previously confirmed overlay projection.

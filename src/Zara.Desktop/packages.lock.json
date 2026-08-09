@@ -12,7 +12,10 @@
         "type": "Project"
       },
       "zara.infrastructure.windows": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "Zara.Application": "[1.0.0, )"
+        }
       }
     }
   }

@@ -5,9 +5,12 @@
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <ApplicationIcon>Assets\ZaraIcon.ico</ApplicationIcon>
+    <ApplicationIcon>Assets\ZaraShellIcon.ico</ApplicationIcon>
+    <StartupObject>Zara.Desktop.Program</StartupObject>
     <AssemblyName>Zara.Desktop</AssemblyName>
     <RootNamespace>Zara.Desktop</RootNamespace>
+    <EnableDevelopmentSafetyControls Condition="'$(EnableDevelopmentSafetyControls)' == ''">true</EnableDevelopmentSafetyControls>
+    <DefineConstants Condition="'$(EnableDevelopmentSafetyControls)' == 'true'">$(DefineConstants);ZARA_DEVELOPMENT_SAFETY_CONTROLS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,5 +21,13 @@
   <ItemGroup>
     <Resource Include="Assets\ZaraIcon.ico" />
     <Resource Include="Assets\ZaraIcon.png" />
+    <Resource Include="Assets\ZaraShellIcon.ico" />
+    <Resource Include="Assets\ZaraShellIcon.png" />
   </ItemGroup>
+
+  <Target Name="RejectIncompleteProductSafetyArtifact"
+          BeforeTargets="PrepareForBuild"
+          Condition="'$(EnableDevelopmentSafetyControls)' != 'true'">
+    <Error Text="Product artifacts without development safety controls are blocked until the product emergency-unlock path is implemented." />
+  </Target>
 </Project>

@@ -80,11 +80,11 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged
         StatusText = (state.DesiredLock, state.OverlayProjection) switch
         {
             (LockState.Locked, OverlayProjectionState.Visible) =>
-                "모든 모니터에 오버레이를 표시했습니다. 각 화면의 개발 즉시 해제로 전체 오버레이를 제거할 수 있습니다.",
+                "모든 모니터에 오버레이를 표시했습니다.",
             (LockState.Unlocked, OverlayProjectionState.Hidden) =>
                 "오버레이가 해제되었으며 다시 시연할 수 있습니다.",
             (_, OverlayProjectionState.Unknown) =>
-                "오버레이 투영 결과를 확인할 수 없습니다. 종료하지 말고 개발 즉시 해제를 다시 시도하십시오.",
+                "오버레이 투영 결과를 확인할 수 없습니다. 잠금 화면의 복구 수단을 사용하십시오.",
             _ => "오버레이 상태를 조정하고 있습니다.",
         };
     }
