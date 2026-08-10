@@ -7,7 +7,7 @@ namespace Zara.Application.Locking;
 /// </summary>
 /// <param name="DesiredLock">The lock state requested by the latest intent.</param>
 /// <param name="Revision">
-/// A monotonically increasing value changed by every explicit lock, safety-unlock, or exit intent.
+/// A monotonically increasing value changed by every explicit lock, unlock, safety-unlock, or exit intent.
 /// </param>
 public sealed record LockIntentSnapshot(LockState DesiredLock, long Revision);
 
@@ -34,7 +34,16 @@ public interface ILockRuntimeUseCase
     Task RequestLockAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Requests that the normal lock be removed and waits until all overlays are removed.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the pending request.</param>
+    /// <returns>A task that completes after all effects produced by the request finish.</returns>
+    Task RequestUnlockAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Requests the development safety unlock and waits until all overlays are removed.
+    /// This remains separate from product policy so development recovery keeps its unconditional
+    /// behavior even when the product's time rules would ordinarily require a lock.
     /// </summary>
     /// <param name="cancellationToken">Cancels the pending request.</param>
     /// <returns>A task that completes after all effects produced by the request finish.</returns>

@@ -577,6 +577,9 @@ public sealed class SystemShutdownUseCaseTests
         }
 
         public Task RequestDevelopmentUnlockAsync(CancellationToken cancellationToken = default)
+            => RequestUnlockAsync(cancellationToken);
+
+        public Task RequestUnlockAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             lock (_intentSync)

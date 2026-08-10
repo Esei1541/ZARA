@@ -49,8 +49,12 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
         DispatchIntentAsync(new LockRequested(), cancellationToken);
 
     /// <inheritdoc />
-    public Task RequestDevelopmentUnlockAsync(CancellationToken cancellationToken = default) =>
+    public Task RequestUnlockAsync(CancellationToken cancellationToken = default) =>
         DispatchIntentAsync(new SafetyUnlockRequested(), cancellationToken);
+
+    /// <inheritdoc />
+    public Task RequestDevelopmentUnlockAsync(CancellationToken cancellationToken = default) =>
+        RequestUnlockAsync(cancellationToken);
 
     /// <inheritdoc />
     public Task<bool> RestoreLockIfIntentRevisionAsync(
