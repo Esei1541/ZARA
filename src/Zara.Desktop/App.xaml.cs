@@ -3,15 +3,19 @@ using System.Drawing;
 using System.IO;
 using System.Windows;
 using System.Windows.Forms;
+using System.Windows.Threading;
+using Microsoft.Win32;
 using Zara.Application.Continuity;
 using Zara.Application.Locking;
 using Zara.Application.SystemPower;
+using Zara.Application.UsagePolicy;
 using Zara.Core.Continuity;
 using Zara.Core.Runtime;
 using Zara.Desktop.Overlays;
 using Zara.Desktop.ViewModels;
 using Zara.Infrastructure.Windows;
 using Zara.Infrastructure.Windows.Continuity;
+using Zara.Infrastructure.Windows.UsagePolicy;
 using Zara.Supervision.Contracts;
 
 namespace Zara.Desktop;
@@ -19,7 +23,7 @@ namespace Zara.Desktop;
 /// <summary>
 /// Composes the supervised desktop process, tray entry point, overlay runtime, and explicit exit.
 /// </summary>
-public partial class App : System.Windows.Application, IDisposable
+public partial class App : System.Windows.Application, IDisposable, IUsagePolicyLockPort
 {
 #if ZARA_DEVELOPMENT_SAFETY_CONTROLS
     private const bool ShowDevelopmentSafetyControls = true;
@@ -35,14 +39,20 @@ public partial class App : System.Windows.Application, IDisposable
     private SystemShutdownUseCase? _systemShutdown;
     private ShutdownCancellationWatchdog? _shutdownCancellationWatchdog;
     private WindowsDesktopRestartSettingsStore? _settingsStore;
+    private WindowsUsagePolicySettingsStore? _usagePolicySettingsStore;
     private WindowsSupervisionConnection? _supervisionConnection;
     private RestartContinuityUseCase? _restartContinuity;
+    private UsagePolicyRuntime? _usagePolicyRuntime;
+    private DispatcherTimer? _usagePolicyRefreshTimer;
     private MainWindowViewModel? _mainWindowViewModel;
+    private EmergencyUnlockWindow? _emergencyUnlockWindow;
     private DesktopRestartSettings _restartSettings = DesktopRestartSettings.Default;
     private bool _lockConditionRequired;
     private bool _exitRequestInProgress;
     private bool _systemShutdownRequestInProgress;
+    private bool _systemEventsSubscribed;
     private CancellationTokenSource? _systemShutdownWatchdog;
+    private int _usagePolicyRefreshInProgress;
     private int _disposeState;
 
     internal bool IsShuttingDown { get; private set; }
@@ -136,13 +146,9 @@ public partial class App : System.Windows.Application, IDisposable
             new WindowsSystemShutdownPort());
         _shutdownCancellationWatchdog = new ShutdownCancellationWatchdog(_systemShutdown);
         _overlayPort.SetSystemShutdownHandler(RequestSystemShutdownAsync);
+        _overlayPort.SetEmergencyUnlockHandler(RequestEmergencyUnlockAsync);
         _overlayPort.SetDevelopmentUnlockHandler(RequestDevelopmentUnlockAsync);
         _overlayPort.ProjectionFaulted += OnOverlayProjectionFaulted;
-
-        _mainWindowViewModel = new MainWindowViewModel(
-            _restartSettings.RestartOnExitWhenUnlocked,
-            UpdateRestartSettingAsync,
-            RequestLockAsync);
         _applicationIcon = LoadApplicationIcon();
         _trayIcon = CreateTrayIcon(_applicationIcon);
 
@@ -157,6 +163,24 @@ public partial class App : System.Windows.Application, IDisposable
             await RequireOverlayProjectionAsync().ConfigureAwait(true);
             acknowledgedLease = _restartContinuity.CurrentAcknowledgedLease ?? acknowledgedLease;
         }
+
+        _usagePolicySettingsStore = new WindowsUsagePolicySettingsStore();
+        _usagePolicyRuntime = new UsagePolicyRuntime(
+            _usagePolicySettingsStore,
+            this,
+            new WindowsEmergencyPromptCatalog(),
+            TimeProvider.System);
+        await _usagePolicyRuntime.InitializeAsync().ConfigureAwait(true);
+        _usagePolicyRuntime.StateChanged += OnUsagePolicyRuntimeStateChanged;
+        UpdateEmergencyUnlockAvailability(_usagePolicyRuntime.CurrentSnapshot);
+        acknowledgedLease = _restartContinuity.CurrentAcknowledgedLease ?? acknowledgedLease;
+
+        _mainWindowViewModel = new MainWindowViewModel(
+            _usagePolicyRuntime,
+            _restartSettings.RestartOnExitWhenUnlocked,
+            UpdateRestartSettingAsync,
+            RequestLockAsync);
+        SubscribeUsagePolicyNotifications();
 
         await _supervisionConnection
             .ReportHealthyAsync(acknowledgedLease.Revision)
@@ -232,6 +256,46 @@ public partial class App : System.Windows.Application, IDisposable
         await RequireOverlayProjectionAsync().ConfigureAwait(true);
     }
 
+    /// <inheritdoc />
+    public async Task ApplyPolicyLockRequirementAsync(
+        bool lockRequired,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfShuttingDown();
+        cancellationToken.ThrowIfCancellationRequested();
+
+        RestartContinuityUseCase continuity = GetRestartContinuity();
+        LockRuntimeUseCase runtime = GetLockRuntime();
+        if (lockRequired)
+        {
+            _ = await continuity
+                .PublishLockConditionAsync(lockRequired: true, cancellationToken)
+                .ConfigureAwait(true);
+            _lockConditionRequired = true;
+            await RequireOverlayProjectionAsync().ConfigureAwait(true);
+            return;
+        }
+
+        try
+        {
+            await runtime.RequestUnlockAsync(cancellationToken).ConfigureAwait(true);
+            _ = await continuity
+                .PublishOverlayProjectionAsync(OverlayProjectionState.Hidden, cancellationToken)
+                .ConfigureAwait(true);
+        }
+        catch
+        {
+            await TryPublishOverlayProjectionAsync(OverlayProjectionState.Unknown)
+                .ConfigureAwait(true);
+            throw;
+        }
+
+        _ = await continuity
+            .PublishLockConditionAsync(lockRequired: false, cancellationToken)
+            .ConfigureAwait(true);
+        _lockConditionRequired = false;
+    }
+
     private async Task RequireOverlayProjectionAsync()
     {
         LockRuntimeUseCase runtime = GetLockRuntime();
@@ -280,9 +344,201 @@ public partial class App : System.Windows.Application, IDisposable
         ShowMainWindow();
     }
 
+    private async Task RequestEmergencyUnlockAsync()
+    {
+        ThrowIfShuttingDown();
+        if (_emergencyUnlockWindow is { IsVisible: true } openWindow)
+        {
+            openWindow.Activate();
+            return;
+        }
+
+        UsagePolicyRuntime runtime = GetUsagePolicyRuntime();
+        EmergencyUnlockStartResult start = await runtime
+            .StartEmergencyUnlockAsync()
+            .ConfigureAwait(true);
+        if (start.StartedImmediately)
+        {
+            ShowMainWindow();
+            return;
+        }
+
+        EmergencyUnlockChallenge challenge = start.Challenge ??
+            throw new InvalidOperationException("The emergency unlock challenge is missing.");
+        WpfLockOverlayPort overlayPort = _overlayPort ??
+            throw new InvalidOperationException("The overlay port is not initialized.");
+        overlayPort.SetEmergencyUnlockEnabled(isEnabled: false);
+
+        var window = new EmergencyUnlockWindow(
+            challenge,
+            enteredText => runtime.CompleteEmergencyUnlockAsync(enteredText));
+        _emergencyUnlockWindow = window;
+        window.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_emergencyUnlockWindow, window))
+            {
+                _emergencyUnlockWindow = null;
+            }
+
+            if (!IsShuttingDown)
+            {
+                UpdateEmergencyUnlockAvailability(runtime.CurrentSnapshot);
+            }
+        };
+
+        bool? completed = window.ShowDialog();
+        if (completed == true && !IsShuttingDown)
+        {
+            ShowMainWindow();
+        }
+    }
+
+    private void SubscribeUsagePolicyNotifications()
+    {
+        if (_systemEventsSubscribed)
+        {
+            return;
+        }
+
+        _usagePolicyRefreshTimer = new DispatcherTimer(
+            DispatcherPriority.Background,
+            Dispatcher)
+        {
+            Interval = TimeSpan.FromSeconds(1),
+        };
+        _usagePolicyRefreshTimer.Tick += OnUsagePolicyRefreshTimerTick;
+        _usagePolicyRefreshTimer.Start();
+
+        SystemEvents.TimeChanged += OnWindowsTimeChanged;
+        SystemEvents.PowerModeChanged += OnWindowsPowerModeChanged;
+        _systemEventsSubscribed = true;
+    }
+
+    private void OnUsagePolicyRuntimeStateChanged(
+        object? sender,
+        UsagePolicyRuntimeSnapshot snapshot)
+    {
+        if (IsShuttingDown)
+        {
+            return;
+        }
+
+        if (Dispatcher.CheckAccess())
+        {
+            UpdateEmergencyUnlockAvailability(snapshot);
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(() => UpdateEmergencyUnlockAvailability(snapshot)));
+    }
+
+    private void UpdateEmergencyUnlockAvailability(UsagePolicyRuntimeSnapshot snapshot)
+    {
+        if (IsShuttingDown)
+        {
+            return;
+        }
+
+        bool canRequestEmergencyUnlock = snapshot.Evaluation.IsWithinUsageBan &&
+            snapshot.Evaluation.LockRequired;
+        _overlayPort?.SetEmergencyUnlockEnabled(canRequestEmergencyUnlock);
+    }
+
+    private void UnsubscribeUsagePolicyNotifications()
+    {
+        if (_usagePolicyRefreshTimer is not null)
+        {
+            _usagePolicyRefreshTimer.Stop();
+            _usagePolicyRefreshTimer.Tick -= OnUsagePolicyRefreshTimerTick;
+            _usagePolicyRefreshTimer = null;
+        }
+
+        if (_systemEventsSubscribed)
+        {
+            SystemEvents.TimeChanged -= OnWindowsTimeChanged;
+            SystemEvents.PowerModeChanged -= OnWindowsPowerModeChanged;
+            _systemEventsSubscribed = false;
+        }
+    }
+
+    private async void OnUsagePolicyRefreshTimerTick(object? sender, EventArgs e)
+    {
+        if (Interlocked.Exchange(ref _usagePolicyRefreshInProgress, 1) != 0 || IsShuttingDown)
+        {
+            return;
+        }
+
+#pragma warning disable CA1031 // Timer callbacks cannot propagate failures to a caller.
+        try
+        {
+            if (_usagePolicyRuntime is not null)
+            {
+                await _usagePolicyRuntime.RefreshAsync().ConfigureAwait(true);
+            }
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("The usage-policy refresh failed: {0}", exception);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _usagePolicyRefreshInProgress, 0);
+        }
+#pragma warning restore CA1031
+    }
+
+    private void OnWindowsTimeChanged(object? sender, EventArgs e) =>
+        QueueUsagePolicyOperation(runtime => runtime.RefreshAsync());
+
+    private void OnWindowsPowerModeChanged(object? sender, PowerModeChangedEventArgs e) =>
+        QueueUsagePolicyOperation(
+            e.Mode == PowerModes.Suspend
+                ? ClearEmergencyUnlockForPowerSuspendAsync
+                : runtime => runtime.RefreshAsync());
+
+    private async Task ClearEmergencyUnlockForPowerSuspendAsync(UsagePolicyRuntime runtime)
+    {
+        await runtime.ClearEmergencyUnlockAsync().ConfigureAwait(true);
+        _emergencyUnlockWindow?.Close();
+    }
+
+    private void QueueUsagePolicyOperation(Func<UsagePolicyRuntime, Task> operation)
+    {
+        if (IsShuttingDown || _usagePolicyRuntime is null)
+        {
+            return;
+        }
+
+        _ = Dispatcher.BeginInvoke(
+            DispatcherPriority.Background,
+            new Action(async () =>
+            {
+#pragma warning disable CA1031 // Windows system events have no failure channel.
+                try
+                {
+                    UsagePolicyRuntime runtime = _usagePolicyRuntime ??
+                        throw new InvalidOperationException("The usage-policy runtime is not initialized.");
+                    await operation(runtime).ConfigureAwait(true);
+                }
+                catch (Exception exception)
+                {
+                    Trace.TraceError("The usage-policy Windows event handling failed: {0}", exception);
+                }
+#pragma warning restore CA1031
+            }));
+    }
+
     private async Task UpdateRestartSettingAsync(bool restartOnExitWhenUnlocked)
     {
         ThrowIfShuttingDown();
+        if (_usagePolicyRuntime is not null &&
+            !_usagePolicyRuntime.CurrentSnapshot.Evaluation.IsSettingsChangeAllowed)
+        {
+            throw new UsagePolicySettingsLockedException();
+        }
+
         if (_restartSettings.RestartOnExitWhenUnlocked == restartOnExitWhenUnlocked)
         {
             return;
@@ -589,6 +845,9 @@ public partial class App : System.Windows.Application, IDisposable
     private RestartContinuityUseCase GetRestartContinuity() => _restartContinuity ??
         throw new InvalidOperationException("Restart continuity is not initialized.");
 
+    private UsagePolicyRuntime GetUsagePolicyRuntime() => _usagePolicyRuntime ??
+        throw new InvalidOperationException("The usage-policy runtime is not initialized.");
+
     private void ThrowIfShuttingDown()
     {
         if (IsShuttingDown || _exitRequestInProgress || _systemShutdownRequestInProgress)
@@ -605,6 +864,13 @@ public partial class App : System.Windows.Application, IDisposable
         }
 
         CancelSystemShutdownWatchdog();
+        UnsubscribeUsagePolicyNotifications();
+
+        if (_emergencyUnlockWindow is not null)
+        {
+            _emergencyUnlockWindow.Close();
+            _emergencyUnlockWindow = null;
+        }
 
         if (_overlayPort is not null)
         {
@@ -633,6 +899,17 @@ public partial class App : System.Windows.Application, IDisposable
 
         _restartContinuity?.Dispose();
         _restartContinuity = null;
+
+        if (_usagePolicyRuntime is not null)
+        {
+            _usagePolicyRuntime.StateChanged -= OnUsagePolicyRuntimeStateChanged;
+        }
+
+        _usagePolicyRuntime?.Dispose();
+        _usagePolicyRuntime = null;
+
+        _usagePolicySettingsStore?.Dispose();
+        _usagePolicySettingsStore = null;
 
 #pragma warning disable CA1031 // Process teardown must release every remaining owned resource.
         try

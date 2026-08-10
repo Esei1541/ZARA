@@ -26,6 +26,12 @@
     <Resource Include="Assets\ZaraShellIcon.png" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Presets\*.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <Target Name="RejectIncompleteProductSafetyArtifact"
           BeforeTargets="PrepareForBuild"
           Condition="'$(EnableDevelopmentSafetyControls)' != 'true'">

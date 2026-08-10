@@ -10,16 +10,20 @@ namespace Zara.Desktop.Overlays;
 internal sealed partial class OverlayWindow : Window
 {
     private readonly Func<Task> _requestSystemShutdown;
+    private readonly Func<Task> _requestEmergencyUnlock;
     private readonly Func<Task> _requestDevelopmentUnlock;
     private bool _coordinatorCloseAllowed;
 
     internal OverlayWindow(
         Func<Task> requestSystemShutdown,
+        Func<Task> requestEmergencyUnlock,
         Func<Task> requestDevelopmentUnlock,
         bool showDevelopmentControls)
     {
         _requestSystemShutdown = requestSystemShutdown ??
             throw new ArgumentNullException(nameof(requestSystemShutdown));
+        _requestEmergencyUnlock = requestEmergencyUnlock ??
+            throw new ArgumentNullException(nameof(requestEmergencyUnlock));
         _requestDevelopmentUnlock = requestDevelopmentUnlock ??
             throw new ArgumentNullException(nameof(requestDevelopmentUnlock));
         InitializeComponent();
@@ -36,6 +40,9 @@ internal sealed partial class OverlayWindow : Window
 
     internal void SetSystemShutdownEnabled(bool isEnabled) =>
         SystemShutdownButton.IsEnabled = isEnabled;
+
+    internal void SetEmergencyUnlockEnabled(bool isEnabled) =>
+        EmergencyUnlockButton.IsEnabled = isEnabled;
 
     protected override void OnClosing(CancelEventArgs e)
     {
@@ -71,6 +78,21 @@ internal sealed partial class OverlayWindow : Window
         {
             Trace.TraceError("The system shutdown request failed: {0}", exception);
             SystemShutdownButton.IsEnabled = true;
+        }
+    }
+
+    private async void EmergencyUnlock_Click(object sender, RoutedEventArgs e)
+    {
+        EmergencyUnlockButton.IsEnabled = false;
+
+        try
+        {
+            await _requestEmergencyUnlock().ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("The emergency unlock request failed: {0}", exception);
+            EmergencyUnlockButton.IsEnabled = true;
         }
     }
 

@@ -1,0 +1,77 @@
+<Window x:Class="Zara.Desktop.Overlays.EmergencyUnlockWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:ClassModifier="internal"
+        Title="긴급 잠금 해제"
+        Width="760"
+        Height="680"
+        MinWidth="620"
+        MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        Topmost="True"
+        Background="#FF12151C">
+  <Grid Margin="28">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="12" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="16" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="8" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <StackPanel>
+      <TextBlock Foreground="White"
+                 FontSize="24"
+                 FontWeight="SemiBold"
+                 Text="긴급 잠금 해제" />
+      <TextBlock Margin="0,8,0,0"
+                 Foreground="#FFD1D6DE"
+                 Text="아래 문장을 줄바꿈까지 포함해 직접 입력하면 잠시 사용할 수 있습니다."
+                 TextWrapping="Wrap" />
+    </StackPanel>
+
+    <Border Grid.Row="2"
+            Padding="18"
+            Background="#FF242832"
+            BorderBrush="#FF4B5362"
+            BorderThickness="1"
+            CornerRadius="10">
+      <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <TextBlock Foreground="White"
+                   FontSize="16"
+                   LineHeight="26"
+                   Text="{Binding ExpectedText}"
+                   TextWrapping="Wrap" />
+      </ScrollViewer>
+    </Border>
+
+    <TextBox x:Name="InputTextBox"
+             Grid.Row="4"
+             MinHeight="96"
+             Padding="12"
+             AcceptsReturn="True"
+             AcceptsTab="False"
+             ContextMenu="{x:Null}"
+             PreviewKeyDown="InputTextBox_PreviewKeyDown"
+             PreviewDrop="InputTextBox_PreviewDrop"
+             TextWrapping="Wrap"
+             VerticalScrollBarVisibility="Auto" />
+
+    <DockPanel Grid.Row="6">
+      <TextBlock x:Name="ValidationMessage"
+                 VerticalAlignment="Center"
+                 Foreground="#FFFFB4B4"
+                 TextWrapping="Wrap" />
+      <Button x:Name="CompleteButton"
+              Width="132"
+              Height="38"
+              HorizontalAlignment="Right"
+              DockPanel.Dock="Right"
+              Click="Complete_Click"
+              Content="긴급 해제"
+              FontWeight="SemiBold" />
+    </DockPanel>
+  </Grid>
+</Window>

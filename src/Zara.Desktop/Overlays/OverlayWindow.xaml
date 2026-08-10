@@ -44,12 +44,13 @@
         <WrapPanel Margin="0,28,0,0"
                    HorizontalAlignment="Center"
                    Orientation="Horizontal">
-          <Button MinWidth="152"
+          <Button x:Name="EmergencyUnlockButton"
+                  MinWidth="152"
                   Height="42"
                   Margin="4,0"
                   Padding="18,0"
-                  Content="긴급 잠금 해제"
-                  IsEnabled="False" />
+                  Click="EmergencyUnlock_Click"
+                  Content="긴급 잠금 해제" />
           <Button x:Name="SystemShutdownButton"
                   MinWidth="152"
                   Height="42"

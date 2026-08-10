@@ -18,7 +18,9 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     private readonly Dictionary<string, OverlayWindow> _windows =
         new(StringComparer.OrdinalIgnoreCase);
     private Func<Task>? _requestSystemShutdown;
+    private Func<Task>? _requestEmergencyUnlock;
     private Func<Task>? _requestDevelopmentUnlock;
+    private bool _emergencyUnlockEnabled;
     private bool _maintainVisibleProjection;
     private bool _topologySubscribed;
     private bool _disposed;
@@ -62,6 +64,18 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         _requestDevelopmentUnlock = requestDevelopmentUnlock;
     }
 
+    internal void SetEmergencyUnlockHandler(Func<Task> requestEmergencyUnlock)
+    {
+        ArgumentNullException.ThrowIfNull(requestEmergencyUnlock);
+
+        if (_requestEmergencyUnlock is not null)
+        {
+            throw new InvalidOperationException("The emergency unlock handler is already configured.");
+        }
+
+        _requestEmergencyUnlock = requestEmergencyUnlock;
+    }
+
     internal void SetSystemShutdownEnabled(bool isEnabled)
     {
         ThrowIfDisposed();
@@ -69,6 +83,17 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         foreach (OverlayWindow window in _windows.Values)
         {
             window.SetSystemShutdownEnabled(isEnabled);
+        }
+    }
+
+    internal void SetEmergencyUnlockEnabled(bool isEnabled)
+    {
+        ThrowIfDisposed();
+        _emergencyUnlockEnabled = isEnabled;
+
+        foreach (OverlayWindow window in _windows.Values)
+        {
+            window.SetEmergencyUnlockEnabled(isEnabled);
         }
     }
 
@@ -189,8 +214,10 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     {
         var window = new OverlayWindow(
             RequestSystemShutdownAsync,
+            RequestEmergencyUnlockAsync,
             RequestDevelopmentUnlockAsync,
             _showDevelopmentSafetyControls);
+        window.SetEmergencyUnlockEnabled(_emergencyUnlockEnabled);
         window.DpiChanged += (_, _) => ScheduleReconcile();
         window.Loaded += (_, _) => ScheduleReconcile();
         window.ContentRendered += (_, _) => ScheduleReconcile();
@@ -219,6 +246,13 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     {
         Func<Task> handler = _requestDevelopmentUnlock ??
             throw new InvalidOperationException("The development unlock handler is not configured.");
+        return handler();
+    }
+
+    private Task RequestEmergencyUnlockAsync()
+    {
+        Func<Task> handler = _requestEmergencyUnlock ??
+            throw new InvalidOperationException("The emergency unlock handler is not configured.");
         return handler();
     }
 
@@ -356,6 +390,7 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         UnsubscribeTopology();
         CloseAllWindowsCore();
         _requestSystemShutdown = null;
+        _requestEmergencyUnlock = null;
         _requestDevelopmentUnlock = null;
         ProjectionFaulted = null;
         _disposed = true;
