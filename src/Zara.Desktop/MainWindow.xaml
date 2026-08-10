@@ -111,8 +111,7 @@
               <DataGridTemplateColumn Width="*" Header="시작 시각">
                 <DataGridTemplateColumn.CellTemplate>
                   <DataTemplate>
-                    <StackPanel IsEnabled="{Binding IsEnabled}"
-                                HorizontalAlignment="Center"
+                    <StackPanel HorizontalAlignment="Center"
                                 Orientation="Horizontal">
                       <ComboBox Width="68"
                                 ItemsSource="{Binding StartTime.Meridiems}"
@@ -134,8 +133,7 @@
               <DataGridTemplateColumn Width="*" Header="해제 시각">
                 <DataGridTemplateColumn.CellTemplate>
                   <DataTemplate>
-                    <StackPanel IsEnabled="{Binding IsEnabled}"
-                                HorizontalAlignment="Center"
+                    <StackPanel HorizontalAlignment="Center"
                                 Orientation="Horizontal">
                       <ComboBox Width="68"
                                 ItemsSource="{Binding ReleaseTime.Meridiems}"
@@ -194,9 +192,10 @@
           <StackPanel Grid.Row="2"
                       Grid.Column="1"
                       Orientation="Horizontal">
-            <ComboBox Width="100"
-                      ItemsSource="{Binding EmergencyDurationMinuteOptions}"
-                      SelectedItem="{Binding EmergencyDurationMinutes}" />
+            <TextBox Width="100"
+                     MaxLength="2"
+                     HorizontalContentAlignment="Right"
+                     Text="{Binding EmergencyDurationMinutesText, UpdateSourceTrigger=PropertyChanged}" />
             <TextBlock Margin="8,0,0,0"
                        VerticalAlignment="Center"
                        Text="분" />
@@ -207,9 +206,10 @@
           <StackPanel Grid.Row="4"
                       Grid.Column="1"
                       Orientation="Horizontal">
-            <ComboBox Width="100"
-                      ItemsSource="{Binding EmergencySentenceCountOptions}"
-                      SelectedItem="{Binding EmergencySentenceCount}" />
+            <TextBox Width="100"
+                     MaxLength="2"
+                     HorizontalContentAlignment="Right"
+                     Text="{Binding EmergencySentenceCountText, UpdateSourceTrigger=PropertyChanged}" />
             <TextBlock Margin="8,0,0,0"
                        VerticalAlignment="Center"
                        Text="개 (0개면 문장 입력 없이 해제)" />

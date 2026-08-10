@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Windows.Data;
 using System.Windows.Input;
@@ -22,8 +23,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private readonly UsagePolicyRuntime? _usagePolicyRuntime;
     private bool _restartOnExitWhenUnlocked;
     private bool _isSettingsChangeAllowed = true;
-    private int _emergencyDurationMinutes = EmergencyUnlockSettings.Default.DurationMinutes;
-    private int _emergencySentenceCount = EmergencyUnlockSettings.Default.SentenceCount;
+    private string _emergencyDurationMinutesText = EmergencyUnlockSettings.Default.DurationMinutes
+        .ToString(CultureInfo.InvariantCulture);
+    private string _emergencySentenceCountText = EmergencyUnlockSettings.Default.SentenceCount
+        .ToString(CultureInfo.InvariantCulture);
     private string _usagePolicyStatusMessage = "시간 규칙을 불러오는 중입니다.";
     private string _operationMessage = string.Empty;
     private int _disposed;
@@ -92,20 +95,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>Gets the weekday editors shown on the usage-ban tab.</summary>
     public ObservableCollection<DailyUsageRestrictionViewModel> WeekdayRestrictions { get; }
 
-    /// <summary>Gets the fixed duration values offered by the emergency-unlock form.</summary>
-    public IReadOnlyList<int> EmergencyDurationMinuteOptions { get; } =
-        Enumerable.Range(
-            EmergencyUnlockSettings.MinimumDurationMinutes,
-            EmergencyUnlockSettings.MaximumDurationMinutes -
-                EmergencyUnlockSettings.MinimumDurationMinutes + 1).ToArray();
-
-    /// <summary>Gets the fixed prompt-count values offered by the emergency-unlock form.</summary>
-    public IReadOnlyList<int> EmergencySentenceCountOptions { get; } =
-        Enumerable.Range(
-            EmergencyUnlockSettings.MinimumSentenceCount,
-            EmergencyUnlockSettings.MaximumSentenceCount -
-                EmergencyUnlockSettings.MinimumSentenceCount + 1).ToArray();
-
     /// <summary>Gets the sortable reservation rows.</summary>
     public ObservableCollection<ReservationRowViewModel> Reservations { get; }
 
@@ -138,18 +127,24 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _restartOnExitWhenUnlocked, value);
     }
 
-    /// <summary>Gets or sets the selected emergency-unlock duration in minutes.</summary>
-    public int EmergencyDurationMinutes
+    /// <summary>
+    /// Gets or sets the user-entered emergency-unlock duration. The value is validated only when
+    /// the settings are saved so a partially typed number remains visible to the user.
+    /// </summary>
+    public string EmergencyDurationMinutesText
     {
-        get => _emergencyDurationMinutes;
-        set => SetField(ref _emergencyDurationMinutes, value);
+        get => _emergencyDurationMinutesText;
+        set => SetField(ref _emergencyDurationMinutesText, value);
     }
 
-    /// <summary>Gets or sets the selected emergency prompt count.</summary>
-    public int EmergencySentenceCount
+    /// <summary>
+    /// Gets or sets the user-entered emergency prompt count. The value is validated only when the
+    /// settings are saved so a partially typed number remains visible to the user.
+    /// </summary>
+    public string EmergencySentenceCountText
     {
-        get => _emergencySentenceCount;
-        set => SetField(ref _emergencySentenceCount, value);
+        get => _emergencySentenceCountText;
+        set => SetField(ref _emergencySentenceCountText, value);
     }
 
     /// <summary>Gets a read-only explanation of the current evaluated time-rule state.</summary>
@@ -238,8 +233,16 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private async Task SaveUsagePolicySettingsAsync()
     {
         var emergencyUnlock = new EmergencyUnlockSettings(
-            EmergencyDurationMinutes,
-            EmergencySentenceCount);
+            ParseEmergencySetting(
+                EmergencyDurationMinutesText,
+                "긴급 해제 유지 시간",
+                EmergencyUnlockSettings.MinimumDurationMinutes,
+                EmergencyUnlockSettings.MaximumDurationMinutes),
+            ParseEmergencySetting(
+                EmergencySentenceCountText,
+                "긴급 해제 문장 수",
+                EmergencyUnlockSettings.MinimumSentenceCount,
+                EmergencyUnlockSettings.MaximumSentenceCount));
         await RequireUsagePolicyRuntime()
             .UpdateSettingsAsync(BuildWeeklySchedule(), emergencyUnlock)
             .ConfigureAwait(true);
@@ -286,8 +289,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             editor.Load(snapshot.Settings.WeeklySchedule.GetRestriction(editor.DayOfWeek));
         }
 
-        EmergencyDurationMinutes = snapshot.Settings.EmergencyUnlock.DurationMinutes;
-        EmergencySentenceCount = snapshot.Settings.EmergencyUnlock.SentenceCount;
+        EmergencyDurationMinutesText = snapshot.Settings.EmergencyUnlock.DurationMinutes
+            .ToString(CultureInfo.InvariantCulture);
+        EmergencySentenceCountText = snapshot.Settings.EmergencyUnlock.SentenceCount
+            .ToString(CultureInfo.InvariantCulture);
         ReplaceReservationRows(snapshot.Settings.Reservations);
         UsagePolicyStatusMessage = GetUsagePolicyStatusMessage(snapshot);
         OnPropertyChanged(nameof(CanChangeSettings));
@@ -337,6 +342,27 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         return evaluation.LockRequired
             ? "현재는 사용 금지 시간입니다. 설정을 바꿀 수 없습니다."
             : "현재 설정 변경이 제한되어 있습니다.";
+    }
+
+    private static int ParseEmergencySetting(
+        string value,
+        string displayName,
+        int minimum,
+        int maximum)
+    {
+        if (!int.TryParse(
+                value,
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out int parsedValue) ||
+            parsedValue < minimum ||
+            parsedValue > maximum)
+        {
+            throw new ArgumentException(
+                $"{displayName}은 {minimum}부터 {maximum}까지의 정수로 입력하세요.");
+        }
+
+        return parsedValue;
     }
 
     private UsagePolicyRuntime RequireUsagePolicyRuntime() => _usagePolicyRuntime ??
