@@ -1,107 +1,76 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
-using Zara.Application.Locking;
-using Zara.Core.Runtime;
 using Zara.Desktop.Commands;
 
 namespace Zara.Desktop.ViewModels;
 
 /// <summary>
-/// Projects the overlay demonstration state and delegates all transitions to the Application use case.
+/// Exposes the desktop shell actions and the last acknowledged restart setting.
 /// </summary>
 internal sealed class MainWindowViewModel : INotifyPropertyChanged
 {
-    private readonly ILockRuntimeUseCase _lockRuntime;
-    private readonly AsyncCommand _startLockDemoCommand;
-    private string _statusText = "오버레이 시연을 시작할 준비가 되었습니다.";
-    private bool _isOverlayActive;
+    private readonly Func<bool, Task> _updateRestartSetting;
+    private readonly AsyncCommand _toggleRestartSettingCommand;
+    private bool _restartOnExitWhenUnlocked;
 
     internal MainWindowViewModel(
-        ILockRuntimeUseCase lockRuntime,
-        Func<Task> requestExit)
+        bool restartOnExitWhenUnlocked,
+        Func<bool, Task> updateRestartSetting,
+        Func<Task> requestLock)
     {
-        _lockRuntime = lockRuntime ?? throw new ArgumentNullException(nameof(lockRuntime));
-        ArgumentNullException.ThrowIfNull(requestExit);
+        _restartOnExitWhenUnlocked = restartOnExitWhenUnlocked;
+        _updateRestartSetting =
+            updateRestartSetting ?? throw new ArgumentNullException(nameof(updateRestartSetting));
+        ArgumentNullException.ThrowIfNull(requestLock);
 
-        _startLockDemoCommand = new AsyncCommand(
-            StartLockDemoAsync,
-            exception => ReportOperationFailure("오버레이를 시작하지 못했습니다.", exception),
-            () => !IsOverlayActive);
-        ExitCommand = new AsyncCommand(
-            requestExit,
-            exception => ReportOperationFailure("안전하게 종료하지 못했습니다.", exception));
+        _toggleRestartSettingCommand = new AsyncCommand(
+            ToggleRestartSettingAsync,
+            static _ => { });
+        StartLockDemoCommand = new AsyncCommand(
+            requestLock,
+            static _ => { });
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
-    public ICommand StartLockDemoCommand => _startLockDemoCommand;
+    public ICommand ToggleRestartSettingCommand => _toggleRestartSettingCommand;
 
-    public ICommand ExitCommand { get; }
+    public ICommand StartLockDemoCommand { get; }
 
-    public string StatusText
+    public bool RestartOnExitWhenUnlocked
     {
-        get => _statusText;
+        get => _restartOnExitWhenUnlocked;
         private set
         {
-            if (string.Equals(_statusText, value, StringComparison.Ordinal))
+            if (_restartOnExitWhenUnlocked == value)
             {
                 return;
             }
 
-            _statusText = value;
+            _restartOnExitWhenUnlocked = value;
             OnPropertyChanged();
         }
     }
 
-    public bool IsOverlayActive
+    private async Task ToggleRestartSettingAsync()
     {
-        get => _isOverlayActive;
-        private set
-        {
-            if (_isOverlayActive == value)
-            {
-                return;
-            }
+        bool requestedValue = !RestartOnExitWhenUnlocked;
 
-            _isOverlayActive = value;
-            OnPropertyChanged();
-            _startLockDemoCommand.NotifyCanExecuteChanged();
+        // A CheckBox toggles before its command runs. Re-project the acknowledged value
+        // while the durable setting and the supervision lease are being updated.
+        OnPropertyChanged(nameof(RestartOnExitWhenUnlocked));
+
+        try
+        {
+            await _updateRestartSetting(requestedValue).ConfigureAwait(true);
+            RestartOnExitWhenUnlocked = requestedValue;
         }
-    }
-
-    internal void RefreshRuntimeState()
-    {
-        RuntimeState state = _lockRuntime.CurrentState;
-        IsOverlayActive =
-            state.DesiredLock == LockState.Locked &&
-            state.OverlayProjection == OverlayProjectionState.Visible;
-
-        StatusText = (state.DesiredLock, state.OverlayProjection) switch
+        catch
         {
-            (LockState.Locked, OverlayProjectionState.Visible) =>
-                "모든 모니터에 오버레이를 표시했습니다.",
-            (LockState.Unlocked, OverlayProjectionState.Hidden) =>
-                "오버레이가 해제되었으며 다시 시연할 수 있습니다.",
-            (_, OverlayProjectionState.Unknown) =>
-                "오버레이 투영 결과를 확인할 수 없습니다. 잠금 화면의 복구 수단을 사용하십시오.",
-            _ => "오버레이 상태를 조정하고 있습니다.",
-        };
-    }
-
-    internal void ReportOperationFailure(string context, Exception exception)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(context);
-        ArgumentNullException.ThrowIfNull(exception);
-
-        RefreshRuntimeState();
-        StatusText = $"{context} {exception.Message}";
-    }
-
-    private async Task StartLockDemoAsync()
-    {
-        await _lockRuntime.RequestLockAsync().ConfigureAwait(true);
-        RefreshRuntimeState();
+            OnPropertyChanged(nameof(RestartOnExitWhenUnlocked));
+            throw;
+        }
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>

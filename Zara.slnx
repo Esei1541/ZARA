@@ -1,9 +1,12 @@
 <Solution>
   <Project Path="src/Zara.Core/Zara.Core.csproj" />
   <Project Path="src/Zara.Application/Zara.Application.csproj" />
+  <Project Path="src/Zara.Supervision.Contracts/Zara.Supervision.Contracts.csproj" />
   <Project Path="src/Zara.Infrastructure.Windows/Zara.Infrastructure.Windows.csproj" />
   <Project Path="src/Zara.Desktop/Zara.Desktop.csproj" />
+  <Project Path="src/Zara.Enforcement.Service/Zara.Enforcement.Service.csproj" />
   <Project Path="tests/Zara.Core.Tests/Zara.Core.Tests.csproj" />
   <Project Path="tests/Zara.Application.Tests/Zara.Application.Tests.csproj" />
   <Project Path="tests/Zara.Infrastructure.Windows.Tests/Zara.Infrastructure.Windows.Tests.csproj" />
+  <Project Path="tests/Zara.Enforcement.Service.Tests/Zara.Enforcement.Service.Tests.csproj" />
 </Solution>

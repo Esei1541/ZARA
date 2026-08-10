@@ -152,19 +152,9 @@
         "resolved": "13.0.3",
         "contentHash": "HrC5BXdl00IP9zeV+0Z848QWPAoCr9P3bDEZguI+gkLcBKAOxix/tLEAAHC+UvDNPv4a2d18lOReHMOagPa+zQ=="
       },
-      "zara.application": {
+      "zara.enforcement.service": {
         "type": "Project",
         "dependencies": {
-          "Zara.Core": "[1.0.0, )"
-        }
-      },
-      "zara.core": {
-        "type": "Project"
-      },
-      "zara.infrastructure.windows": {
-        "type": "Project",
-        "dependencies": {
-          "Zara.Application": "[1.0.0, )",
           "Zara.Supervision.Contracts": "[1.0.0, )"
         }
       },

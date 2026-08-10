@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Windows;
 
 namespace Zara.Desktop.Overlays;
@@ -33,19 +34,6 @@ internal sealed partial class OverlayWindow : Window
         Close();
     }
 
-    internal void ShowOperationError(string message)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(message);
-        OperationErrorText.Text = message;
-        OperationErrorText.Visibility = Visibility.Visible;
-    }
-
-    internal void ClearOperationError()
-    {
-        OperationErrorText.Text = string.Empty;
-        OperationErrorText.Visibility = Visibility.Collapsed;
-    }
-
     internal void SetSystemShutdownEnabled(bool isEnabled) =>
         SystemShutdownButton.IsEnabled = isEnabled;
 
@@ -73,7 +61,6 @@ internal sealed partial class OverlayWindow : Window
             return;
         }
 
-        ClearOperationError();
         SystemShutdownButton.IsEnabled = false;
 
         try
@@ -82,7 +69,7 @@ internal sealed partial class OverlayWindow : Window
         }
         catch (Exception exception)
         {
-            ShowOperationError($"시스템 종료에 실패했습니다. 다시 시도하십시오. {exception.Message}");
+            Trace.TraceError("The system shutdown request failed: {0}", exception);
             SystemShutdownButton.IsEnabled = true;
         }
     }
@@ -90,7 +77,6 @@ internal sealed partial class OverlayWindow : Window
     private async void DevelopmentUnlock_Click(object sender, RoutedEventArgs e)
     {
         DevelopmentUnlockButton.IsEnabled = false;
-        ClearOperationError();
 
         try
         {
@@ -98,8 +84,7 @@ internal sealed partial class OverlayWindow : Window
         }
         catch (Exception exception)
         {
-            ShowOperationError(
-                $"잠금 해제(개발용)에 실패했습니다. 다시 시도하십시오. {exception.Message}");
+            Trace.TraceError("The development unlock request failed: {0}", exception);
             DevelopmentUnlockButton.IsEnabled = true;
         }
     }

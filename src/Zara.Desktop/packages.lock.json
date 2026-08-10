@@ -14,8 +14,12 @@
       "zara.infrastructure.windows": {
         "type": "Project",
         "dependencies": {
-          "Zara.Application": "[1.0.0, )"
+          "Zara.Application": "[1.0.0, )",
+          "Zara.Supervision.Contracts": "[1.0.0, )"
         }
+      },
+      "zara.supervision.contracts": {
+        "type": "Project"
       }
     }
   }

@@ -19,7 +19,6 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         new(StringComparer.OrdinalIgnoreCase);
     private Func<Task>? _requestSystemShutdown;
     private Func<Task>? _requestDevelopmentUnlock;
-    private string? _pendingOperationError;
     private bool _maintainVisibleProjection;
     private bool _topologySubscribed;
     private bool _disposed;
@@ -61,29 +60,6 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         }
 
         _requestDevelopmentUnlock = requestDevelopmentUnlock;
-    }
-
-    internal void ReportOperationFailure(string message)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(message);
-        ThrowIfDisposed();
-
-        _pendingOperationError = message;
-        foreach (OverlayWindow window in _windows.Values)
-        {
-            window.ShowOperationError(message);
-        }
-    }
-
-    internal void ClearOperationError()
-    {
-        ThrowIfDisposed();
-
-        _pendingOperationError = null;
-        foreach (OverlayWindow window in _windows.Values)
-        {
-            window.ClearOperationError();
-        }
     }
 
     internal void SetSystemShutdownEnabled(bool isEnabled)
@@ -215,11 +191,6 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
             RequestSystemShutdownAsync,
             RequestDevelopmentUnlockAsync,
             _showDevelopmentSafetyControls);
-        if (_pendingOperationError is not null)
-        {
-            window.ShowOperationError(_pendingOperationError);
-        }
-
         window.DpiChanged += (_, _) => ScheduleReconcile();
         window.Loaded += (_, _) => ScheduleReconcile();
         window.ContentRendered += (_, _) => ScheduleReconcile();
@@ -386,7 +357,6 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         CloseAllWindowsCore();
         _requestSystemShutdown = null;
         _requestDevelopmentUnlock = null;
-        _pendingOperationError = null;
         ProjectionFaulted = null;
         _disposed = true;
     }

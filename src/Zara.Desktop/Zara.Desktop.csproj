@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Zara.Application\Zara.Application.csproj" />
     <ProjectReference Include="..\Zara.Infrastructure.Windows\Zara.Infrastructure.Windows.csproj" />
+    <ProjectReference Include="..\Zara.Supervision.Contracts\Zara.Supervision.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

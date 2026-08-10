@@ -3,18 +3,18 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="ZARA"
         Width="620"
-        Height="440"
+        Height="300"
         MinWidth="540"
-        MinHeight="380"
+        MinHeight="280"
         Icon="Assets/ZaraIcon.png"
         Background="#FFF7F8FA"
         WindowStartupLocation="CenterScreen">
   <Grid Margin="32">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
-      <RowDefinition Height="20" />
-      <RowDefinition Height="*" />
-      <RowDefinition Height="20" />
+      <RowDefinition Height="32" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="24" />
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
@@ -28,48 +28,25 @@
               DockPanel.Dock="Left">
         <Image Source="Assets/ZaraIcon.png" Stretch="Uniform" />
       </Border>
-      <StackPanel VerticalAlignment="Center">
-        <TextBlock FontSize="26" FontWeight="SemiBold" Text="ZARA" />
-        <TextBlock Margin="0,4,0,0" Foreground="#FF4C5563" Text="복구 가능한 오버레이 시연" />
-      </StackPanel>
+      <TextBlock VerticalAlignment="Center"
+                 FontSize="26"
+                 FontWeight="SemiBold"
+                 Text="ZARA" />
     </DockPanel>
 
-    <Border Grid.Row="2"
-            Padding="24"
-            Background="White"
-            BorderBrush="#FFD8DDE5"
-            BorderThickness="1"
-            CornerRadius="12">
-      <StackPanel>
-        <TextBlock FontSize="18" FontWeight="SemiBold" Text="아이콘 클릭 기반 체크포인트 1" />
-        <TextBlock Margin="0,12,0,0"
-                   Foreground="#FF313844"
-                   Text="{Binding StatusText}"
-                   TextWrapping="Wrap" />
-        <Border Margin="0,18,0,0"
-                Padding="14"
-                Background="#FFF2F4F7"
-                CornerRadius="8">
-          <TextBlock Foreground="#FF505966" TextWrapping="Wrap">
-            이 단계는 모든 모니터를 덮는 오버레이만 시연합니다.
-            작업 관리자 제한, 전역 입력 억제와 Service는 아직 적용하지 않습니다.
-          </TextBlock>
-        </Border>
-      </StackPanel>
-    </Border>
+    <CheckBox Grid.Row="2"
+              Command="{Binding ToggleRestartSettingCommand}"
+              Content="평상시에도 프로그램이 종료되면 재실행"
+              IsChecked="{Binding RestartOnExitWhenUnlocked, Mode=OneWay}"
+              VerticalContentAlignment="Center" />
 
-    <StackPanel Grid.Row="4" HorizontalAlignment="Right" Orientation="Horizontal">
-      <Button MinWidth="104"
-              Height="36"
-              Margin="0,0,10,0"
-              Command="{Binding ExitCommand}"
-              Content="종료" />
-      <Button MinWidth="156"
-              Height="36"
-              Padding="16,0"
-              Command="{Binding StartLockDemoCommand}"
-              Content="오버레이 시연 시작"
-              FontWeight="SemiBold" />
-    </StackPanel>
+    <Button Grid.Row="4"
+            MinWidth="156"
+            Height="36"
+            Padding="16,0"
+            HorizontalAlignment="Right"
+            Command="{Binding StartLockDemoCommand}"
+            Content="오버레이 시연 시작"
+            FontWeight="SemiBold" />
   </Grid>
 </Window>

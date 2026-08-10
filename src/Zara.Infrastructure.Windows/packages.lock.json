@@ -10,6 +10,9 @@
       },
       "zara.core": {
         "type": "Project"
+      },
+      "zara.supervision.contracts": {
+        "type": "Project"
       }
     }
   }

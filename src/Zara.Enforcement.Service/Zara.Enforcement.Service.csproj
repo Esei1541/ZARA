@@ -1,14 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWindowsForms>true</UseWindowsForms>
+    <OutputType>Exe</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>Zara.Infrastructure.Windows</AssemblyName>
-    <RootNamespace>Zara.Infrastructure.Windows</RootNamespace>
+    <AssemblyName>Zara.Enforcement.Service</AssemblyName>
+    <RootNamespace>Zara.Enforcement.Service</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Zara.Application\Zara.Application.csproj" />
     <ProjectReference Include="..\Zara.Supervision.Contracts\Zara.Supervision.Contracts.csproj" />
   </ItemGroup>
 </Project>

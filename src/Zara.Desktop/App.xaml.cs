@@ -1,18 +1,23 @@
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Windows;
 using System.Windows.Forms;
+using Zara.Application.Continuity;
 using Zara.Application.Locking;
 using Zara.Application.SystemPower;
+using Zara.Core.Continuity;
 using Zara.Core.Runtime;
 using Zara.Desktop.Overlays;
 using Zara.Desktop.ViewModels;
 using Zara.Infrastructure.Windows;
+using Zara.Infrastructure.Windows.Continuity;
+using Zara.Supervision.Contracts;
 
 namespace Zara.Desktop;
 
 /// <summary>
-/// Composes the desktop process, tray entry point, overlay runtime, and safe application shutdown.
+/// Composes the supervised desktop process, tray entry point, overlay runtime, and explicit exit.
 /// </summary>
 public partial class App : System.Windows.Application, IDisposable
 {
@@ -28,62 +33,46 @@ public partial class App : System.Windows.Application, IDisposable
     private WpfLockOverlayPort? _overlayPort;
     private LockRuntimeUseCase? _lockRuntime;
     private SystemShutdownUseCase? _systemShutdown;
-    private WindowsShutdownCancellationGuard? _shutdownGuard;
+    private ShutdownCancellationWatchdog? _shutdownCancellationWatchdog;
+    private WindowsDesktopRestartSettingsStore? _settingsStore;
+    private WindowsSupervisionConnection? _supervisionConnection;
+    private RestartContinuityUseCase? _restartContinuity;
     private MainWindowViewModel? _mainWindowViewModel;
+    private DesktopRestartSettings _restartSettings = DesktopRestartSettings.Default;
+    private bool _lockConditionRequired;
     private bool _exitRequestInProgress;
     private bool _systemShutdownRequestInProgress;
-    private bool _shutdownAwaitingSessionEnd;
-    private Guid _activeSystemShutdownRequestId;
+    private CancellationTokenSource? _systemShutdownWatchdog;
+    private int _disposeState;
 
     internal bool IsShuttingDown { get; private set; }
 
-    protected override void OnStartup(StartupEventArgs e)
+    protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
 
         try
         {
-            _displayTopology = new WindowsDisplayTopology();
-            _overlayPort = new WpfLockOverlayPort(
-                Dispatcher,
-                _displayTopology,
-                new NativeWindowPositioner(),
-                ShowDevelopmentSafetyControls);
-            _lockRuntime = new LockRuntimeUseCase(_overlayPort);
-            _systemShutdown = new SystemShutdownUseCase(
-                _lockRuntime,
-                new WindowsSystemShutdownPort());
-            _overlayPort.SetSystemShutdownHandler(RequestSystemShutdownAsync);
-            _overlayPort.SetDevelopmentUnlockHandler(RequestDevelopmentUnlockAsync);
-            _overlayPort.ProjectionFaulted += OnOverlayProjectionFaulted;
-
-            _mainWindowViewModel = new MainWindowViewModel(_lockRuntime, RequestExitAsync);
-            _applicationIcon = LoadApplicationIcon();
-            _trayIcon = CreateTrayIcon(_applicationIcon);
-            if (WindowsShutdownGuardProcess.IsRecoveryLaunch(e.Args))
-            {
-                _ = RestoreLockAfterCancelledShutdownLaunchAsync(e.Args);
-            }
-            else
-            {
-                ShowMainWindow();
-            }
+            await InitializeAsync(e.Args).ConfigureAwait(true);
         }
-        catch
+        catch (Exception exception)
         {
+            Trace.TraceError("ZARA desktop initialization failed: {0}", exception);
             DisposeOwnedResources();
-            throw;
+            Shutdown(exitCode: 1);
         }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        IsShuttingDown = true;
+        CancelSystemShutdownWatchdog();
         Dispose();
         base.OnExit(e);
     }
 
     /// <summary>
-    /// Releases tray, overlay, topology, and runtime resources owned by the desktop process.
+    /// Releases tray, supervision, overlay, topology, and runtime resources owned by the process.
     /// </summary>
     public void Dispose()
     {
@@ -114,6 +103,92 @@ public partial class App : System.Windows.Application, IDisposable
         window.Activate();
     }
 
+    private async Task InitializeAsync(IReadOnlyList<string> arguments)
+    {
+        string? launchToken = ParseServiceLaunchToken(arguments);
+
+        _settingsStore = new WindowsDesktopRestartSettingsStore();
+        _restartSettings = await _settingsStore.LoadAsync().ConfigureAwait(true);
+
+        RestartContinuityDecision initialDecision = RestartContinuityPolicy.Decide(
+            lockRequired: false,
+            _restartSettings.RestartOnExitWhenUnlocked);
+        var initialLease = new SupervisionLease(
+            Revision: 0,
+            RestartRequiredAfterExit: initialDecision.RestartRequired,
+            RecoverLockOnRestart: initialDecision.RecoverLock);
+        _supervisionConnection = await WindowsSupervisionConnection
+            .ConnectAsync(launchToken, initialLease)
+            .ConfigureAwait(true);
+        _restartContinuity = new RestartContinuityUseCase(
+            _supervisionConnection,
+            _restartSettings.RestartOnExitWhenUnlocked);
+
+        _displayTopology = new WindowsDisplayTopology();
+        _overlayPort = new WpfLockOverlayPort(
+            Dispatcher,
+            _displayTopology,
+            new NativeWindowPositioner(),
+            ShowDevelopmentSafetyControls);
+        _lockRuntime = new LockRuntimeUseCase(_overlayPort);
+        _systemShutdown = new SystemShutdownUseCase(
+            _lockRuntime,
+            new WindowsSystemShutdownPort());
+        _shutdownCancellationWatchdog = new ShutdownCancellationWatchdog(_systemShutdown);
+        _overlayPort.SetSystemShutdownHandler(RequestSystemShutdownAsync);
+        _overlayPort.SetDevelopmentUnlockHandler(RequestDevelopmentUnlockAsync);
+        _overlayPort.ProjectionFaulted += OnOverlayProjectionFaulted;
+
+        _mainWindowViewModel = new MainWindowViewModel(
+            _restartSettings.RestartOnExitWhenUnlocked,
+            UpdateRestartSettingAsync,
+            RequestLockAsync);
+        _applicationIcon = LoadApplicationIcon();
+        _trayIcon = CreateTrayIcon(_applicationIcon);
+
+        bool recoverLock = _supervisionConnection.Registration.RecoverLockOnStart;
+        RestartContinuityLease acknowledgedLease = await _restartContinuity
+            .PublishLockConditionAsync(recoverLock)
+            .ConfigureAwait(true);
+        _lockConditionRequired = recoverLock;
+
+        if (recoverLock)
+        {
+            await RequireOverlayProjectionAsync().ConfigureAwait(true);
+            acknowledgedLease = _restartContinuity.CurrentAcknowledgedLease ?? acknowledgedLease;
+        }
+
+        await _supervisionConnection
+            .ReportHealthyAsync(acknowledgedLease.Revision)
+            .ConfigureAwait(true);
+
+        if (launchToken is null)
+        {
+            ShowMainWindow();
+        }
+    }
+
+    private static string? ParseServiceLaunchToken(IReadOnlyList<string> arguments)
+    {
+        if (arguments.Count == 0)
+        {
+            return null;
+        }
+
+        if (arguments.Count != 2 ||
+            !string.Equals(
+                arguments[0],
+                SupervisionProtocol.RecoverySwitch,
+                StringComparison.Ordinal) ||
+            arguments[1].Length != 64 ||
+            !arguments[1].All(Uri.IsHexDigit))
+        {
+            throw new ArgumentException("The desktop launch arguments are invalid.", nameof(arguments));
+        }
+
+        return arguments[1];
+    }
+
     private static Icon LoadApplicationIcon()
     {
         var resourceUri = new Uri("Assets/ZaraIcon.ico", UriKind.Relative);
@@ -129,14 +204,9 @@ public partial class App : System.Windows.Application, IDisposable
     private NotifyIcon CreateTrayIcon(Icon icon)
     {
         var menu = new ContextMenuStrip();
-        var openItem = new ToolStripMenuItem("ZARA 열기");
-        openItem.Click += (_, _) => ShowMainWindow();
-
         var exitItem = new ToolStripMenuItem("종료");
         exitItem.Click += async (_, _) => await RequestExitFromTrayAsync().ConfigureAwait(true);
 
-        menu.Items.Add(openItem);
-        menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
 
         var trayIcon = new NotifyIcon
@@ -150,37 +220,118 @@ public partial class App : System.Windows.Application, IDisposable
         return trayIcon;
     }
 
+    private async Task RequestLockAsync()
+    {
+        ThrowIfShuttingDown();
+        RestartContinuityUseCase continuity = GetRestartContinuity();
+
+        _ = await continuity
+            .PublishLockConditionAsync(lockRequired: true)
+            .ConfigureAwait(true);
+        _lockConditionRequired = true;
+        await RequireOverlayProjectionAsync().ConfigureAwait(true);
+    }
+
+    private async Task RequireOverlayProjectionAsync()
+    {
+        LockRuntimeUseCase runtime = GetLockRuntime();
+        RestartContinuityUseCase continuity = GetRestartContinuity();
+
+        try
+        {
+            await runtime.RequestLockAsync().ConfigureAwait(true);
+            _ = await continuity
+                .PublishOverlayProjectionAsync(OverlayProjectionState.Visible)
+                .ConfigureAwait(true);
+        }
+        catch
+        {
+            await TryPublishOverlayProjectionAsync(OverlayProjectionState.Unknown)
+                .ConfigureAwait(true);
+            throw;
+        }
+    }
+
     private async Task RequestDevelopmentUnlockAsync()
     {
-        LockRuntimeUseCase runtime = _lockRuntime ??
-            throw new InvalidOperationException("The lock runtime is not initialized.");
+        ThrowIfShuttingDown();
+        RestartContinuityUseCase continuity = GetRestartContinuity();
+        LockRuntimeUseCase runtime = GetLockRuntime();
 
-        if (_shutdownGuard is not null)
+        _ = await continuity
+            .PublishLockConditionAsync(lockRequired: false)
+            .ConfigureAwait(true);
+        _lockConditionRequired = false;
+
+        try
         {
-#pragma warning disable CA1031 // Development unlock must proceed even if the guard channel has ended.
-            try
-            {
-                await _shutdownGuard
-                    .SuppressFallbackRecoveryAsync(CancellationToken.None)
-                    .ConfigureAwait(true);
-            }
-            catch (Exception)
-            {
-            }
-#pragma warning restore CA1031
+            await runtime.RequestDevelopmentUnlockAsync().ConfigureAwait(true);
+            _ = await continuity
+                .PublishOverlayProjectionAsync(OverlayProjectionState.Hidden)
+                .ConfigureAwait(true);
+        }
+        catch
+        {
+            await TryPublishOverlayProjectionAsync(OverlayProjectionState.Unknown)
+                .ConfigureAwait(true);
+            throw;
         }
 
-        await runtime.RequestDevelopmentUnlockAsync().ConfigureAwait(true);
-        _mainWindowViewModel?.RefreshRuntimeState();
         ShowMainWindow();
+    }
+
+    private async Task UpdateRestartSettingAsync(bool restartOnExitWhenUnlocked)
+    {
+        ThrowIfShuttingDown();
+        if (_restartSettings.RestartOnExitWhenUnlocked == restartOnExitWhenUnlocked)
+        {
+            return;
+        }
+
+        WindowsDesktopRestartSettingsStore store = _settingsStore ??
+            throw new InvalidOperationException("The restart settings store is not initialized.");
+        RestartContinuityUseCase continuity = GetRestartContinuity();
+        DesktopRestartSettings previous = _restartSettings;
+        var updated = new DesktopRestartSettings(restartOnExitWhenUnlocked);
+
+        if (restartOnExitWhenUnlocked)
+        {
+            _ = await continuity
+                .PublishRestartWhenAvailableAsync(restartWhenAvailable: true)
+                .ConfigureAwait(true);
+            try
+            {
+                await store.SaveAsync(updated).ConfigureAwait(true);
+            }
+            catch
+            {
+                await TryPublishRestartSettingAsync(previous.RestartOnExitWhenUnlocked)
+                    .ConfigureAwait(true);
+                throw;
+            }
+        }
+        else
+        {
+            await store.SaveAsync(updated).ConfigureAwait(true);
+            try
+            {
+                _ = await continuity
+                    .PublishRestartWhenAvailableAsync(restartWhenAvailable: false)
+                    .ConfigureAwait(true);
+            }
+            catch
+            {
+                await TrySaveSettingsAsync(previous).ConfigureAwait(true);
+                throw;
+            }
+        }
+
+        _restartSettings = updated;
     }
 
     private async Task RequestSystemShutdownAsync()
     {
-        if (_exitRequestInProgress ||
-            _systemShutdownRequestInProgress ||
-            _shutdownAwaitingSessionEnd ||
-            IsShuttingDown)
+        if (_exitRequestInProgress || _systemShutdownRequestInProgress || IsShuttingDown)
         {
             return;
         }
@@ -190,299 +341,142 @@ public partial class App : System.Windows.Application, IDisposable
         WpfLockOverlayPort overlayPort = _overlayPort ??
             throw new InvalidOperationException("The overlay port is not initialized.");
 
-        overlayPort.ClearOperationError();
-        overlayPort.SetSystemShutdownEnabled(isEnabled: false);
         _systemShutdownRequestInProgress = true;
-        WindowsShutdownCancellationGuard? guard = null;
-        Guid requestId = Guid.NewGuid();
-        _activeSystemShutdownRequestId = requestId;
-
+        overlayPort.SetSystemShutdownEnabled(isEnabled: false);
+        bool watchdogStarted = false;
         try
         {
-            _shutdownGuard?.Dispose();
-            _shutdownGuard = null;
-            guard = await WindowsShutdownCancellationGuard
-                .ArmAsync(
-                    () => RecoverAfterCancelledShutdownAsync(requestId),
-                    restoreLockIfParentExits: true,
-                    recoveryFailed => CompleteCancelledShutdownAcknowledgementAsync(
-                        requestId,
-                        recoveryFailed),
-                    exception => RecoverAfterShutdownGuardFaultAsync(requestId, exception))
-                .ConfigureAwait(true);
-            _shutdownGuard = guard;
-            if (_lockRuntime?.CurrentIntent.DesiredLock != LockState.Locked)
-            {
-                await guard
-                    .SuppressFallbackRecoveryAsync(CancellationToken.None)
-                    .ConfigureAwait(true);
-            }
-            _shutdownAwaitingSessionEnd = true;
+            Guid requestId = Guid.NewGuid();
             await shutdown.RequestShutdownAsync(requestId).ConfigureAwait(true);
+            StartSystemShutdownWatchdog(requestId);
+            watchdogStarted = true;
+            await TryPublishOverlayProjectionAsync(OverlayProjectionState.Hidden)
+                .ConfigureAwait(true);
         }
         catch (Exception exception)
         {
-            _shutdownAwaitingSessionEnd = false;
-            if (_activeSystemShutdownRequestId == requestId)
-            {
-                _activeSystemShutdownRequestId = Guid.Empty;
-            }
-            if (guard is not null)
-            {
-                await guard.DisarmAsync(CancellationToken.None).ConfigureAwait(true);
-                if (ReferenceEquals(_shutdownGuard, guard))
-                {
-                    _shutdownGuard = null;
-                }
-            }
-
-            string failureContext = GetSystemShutdownFailureContext();
-            overlayPort.ReportOperationFailure($"{failureContext} {exception.Message}");
+            Trace.TraceError("The system shutdown request failed: {0}", exception);
+            await PublishCurrentProjectionBestEffortAsync().ConfigureAwait(true);
             overlayPort.SetSystemShutdownEnabled(isEnabled: true);
-            ReportOperationFailure(failureContext, exception);
             throw;
         }
         finally
         {
-            _systemShutdownRequestInProgress = false;
+            if (!watchdogStarted)
+            {
+                _systemShutdownRequestInProgress = false;
+            }
         }
     }
 
-    private Task<ShutdownCancellationRecoveryResult> RecoverAfterCancelledShutdownAsync(
-        Guid requestId)
+    private void StartSystemShutdownWatchdog(Guid requestId)
     {
-        if (Dispatcher.CheckAccess())
-        {
-            return RecoverAfterCancelledShutdownOnDispatcherAsync(requestId);
-        }
-
-        return Dispatcher
-            .InvokeAsync(() => RecoverAfterCancelledShutdownOnDispatcherAsync(requestId))
-            .Task
-            .Unwrap();
+        CancelSystemShutdownWatchdog();
+        var cancellation = new CancellationTokenSource();
+        _systemShutdownWatchdog = cancellation;
+        _ = RunSystemShutdownWatchdogAsync(requestId, cancellation);
     }
 
-    private async Task<ShutdownCancellationRecoveryResult>
-        RecoverAfterCancelledShutdownOnDispatcherAsync(Guid requestId)
+    private async Task RunSystemShutdownWatchdogAsync(
+        Guid requestId,
+        CancellationTokenSource cancellation)
     {
-        SystemShutdownUseCase shutdown = _systemShutdown ??
-            throw new InvalidOperationException("The system shutdown use case is not initialized.");
-        WpfLockOverlayPort overlayPort = _overlayPort ??
-            throw new InvalidOperationException("The overlay port is not initialized.");
-
+#pragma warning disable CA1031 // A failed watchdog must still re-arm the lock UI best effort.
         try
         {
-            ShutdownCancellationRecoveryResult result =
-                await shutdown
-                    .HandleShutdownCancellationAsync(requestId)
-                    .ConfigureAwait(true);
-            if (_activeSystemShutdownRequestId != requestId)
+            ShutdownCancellationWatchdog watchdog = _shutdownCancellationWatchdog ??
+                throw new InvalidOperationException(
+                    "The system shutdown cancellation watchdog is not initialized.");
+            _ = await watchdog
+                .RecoverIfStillAliveAsync(requestId, cancellation.Token)
+                .ConfigureAwait(true);
+            if (IsShuttingDown)
             {
-                return result;
+                return;
             }
-
-            _mainWindowViewModel?.RefreshRuntimeState();
-
-            if (result == ShutdownCancellationRecoveryResult.LockRestored)
-            {
-                overlayPort.ReportOperationFailure(
-                    "Windows 종료가 취소되어 잠금 화면을 다시 적용했습니다.");
-            }
-            else if (result == ShutdownCancellationRecoveryResult.SupersededByNewerIntent)
-            {
-                ShowMainWindow();
-            }
-
-            return result;
+            await PublishCurrentProjectionBestEffortAsync().ConfigureAwait(true);
         }
-        catch (Exception exception)
-        {
-            const string failureContext =
-                "Windows 종료가 취소되었지만 잠금 화면을 복구하지 못했습니다.";
-            overlayPort.ReportOperationFailure($"{failureContext} {exception.Message}");
-            ReportOperationFailure(failureContext, exception);
-            throw;
-        }
-    }
-
-    private async Task CompleteCancelledShutdownAcknowledgementAsync(
-        Guid requestId,
-        bool recoveryFailed)
-    {
-        if (recoveryFailed)
-        {
-            await Dispatcher.InvokeAsync(() => EnsureActiveShutdownRequest(requestId));
-            WindowsShutdownCancellationGuard guard = _shutdownGuard ??
-                throw new InvalidOperationException("The shutdown guard is not initialized.");
-            await guard
-                .SuppressFallbackRecoveryAsync(CancellationToken.None)
-                .ConfigureAwait(false);
-        }
-
-        await Dispatcher
-            .InvokeAsync(() => CompleteCancelledShutdownAcknowledgementOnDispatcher(requestId))
-            .Task;
-    }
-
-    private void EnsureActiveShutdownRequest(Guid requestId)
-    {
-        if (_activeSystemShutdownRequestId != requestId)
-        {
-            throw new InvalidOperationException(
-                "The shutdown cancellation acknowledgement is stale.");
-        }
-    }
-
-    private void CompleteCancelledShutdownAcknowledgementOnDispatcher(Guid requestId)
-    {
-        if (_activeSystemShutdownRequestId != requestId)
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             return;
         }
-
-        _shutdownAwaitingSessionEnd = false;
-        _activeSystemShutdownRequestId = Guid.Empty;
-        _overlayPort?.SetSystemShutdownEnabled(isEnabled: true);
-    }
-
-    private Task RecoverAfterShutdownGuardFaultAsync(Guid requestId, Exception exception)
-    {
-        if (Dispatcher.CheckAccess())
-        {
-            return RecoverAfterShutdownGuardFaultOnDispatcherAsync(requestId, exception);
-        }
-
-        return Dispatcher
-            .InvokeAsync(() => RecoverAfterShutdownGuardFaultOnDispatcherAsync(requestId, exception))
-            .Task
-            .Unwrap();
-    }
-
-    private async Task RecoverAfterShutdownGuardFaultOnDispatcherAsync(
-        Guid requestId,
-        Exception exception)
-    {
-        SystemShutdownUseCase shutdown = _systemShutdown ??
-            throw new InvalidOperationException("The system shutdown use case is not initialized.");
-
-#pragma warning disable CA1031 // A failed first compensation is followed by one explicit projection retry.
-        try
-        {
-            _ = await shutdown
-                .HandleShutdownCancellationAsync(requestId)
-                .ConfigureAwait(true);
-        }
-        catch (Exception)
-        {
-        }
-#pragma warning restore CA1031
-
-        await EnsureCurrentLockIntentProjectedAsync().ConfigureAwait(true);
-        _mainWindowViewModel?.RefreshRuntimeState();
-        const string failureContext =
-            "Windows 종료 확인 프로세스와의 연결이 끊겨 잠금 상태를 안전하게 복구했습니다.";
-        _overlayPort?.ReportOperationFailure($"{failureContext} {exception.Message}");
-        ReportOperationFailure(failureContext, exception);
-    }
-
-    private async Task EnsureCurrentLockIntentProjectedAsync()
-    {
-        LockRuntimeUseCase runtime = _lockRuntime ??
-            throw new InvalidOperationException("The lock runtime is not initialized.");
-        LockIntentSnapshot intent = runtime.CurrentIntent;
-        RuntimeState state = runtime.CurrentState;
-
-        if (intent.DesiredLock == LockState.Locked)
-        {
-            if (state.DesiredLock != LockState.Locked ||
-                state.OverlayProjection != OverlayProjectionState.Visible)
-            {
-                await runtime.RequestLockAsync(CancellationToken.None).ConfigureAwait(true);
-            }
-        }
-        else if (state.DesiredLock != LockState.Unlocked ||
-                 state.OverlayProjection != OverlayProjectionState.Hidden)
-        {
-            await runtime
-                .RequestDevelopmentUnlockAsync(CancellationToken.None)
-                .ConfigureAwait(true);
-        }
-
-        RuntimeState projected = runtime.CurrentState;
-        bool projectionMatchesIntent = runtime.CurrentIntent.DesiredLock switch
-        {
-            LockState.Locked =>
-                projected.DesiredLock == LockState.Locked &&
-                projected.OverlayProjection == OverlayProjectionState.Visible,
-            LockState.Unlocked =>
-                projected.DesiredLock == LockState.Unlocked &&
-                projected.OverlayProjection == OverlayProjectionState.Hidden,
-            _ => false,
-        };
-        if (!projectionMatchesIntent)
-        {
-            throw new InvalidOperationException(
-                "The active lock intent could not be projected after the shutdown guard failed.");
-        }
-    }
-
-    private async Task RestoreLockAfterCancelledShutdownLaunchAsync(
-        IReadOnlyList<string> arguments)
-    {
-#pragma warning disable CA1031 // Recovery launch must keep a visible diagnostic route on failure.
-        try
-        {
-            await WindowsShutdownGuardProcess
-                .CompleteRecoveryLaunchAsync(
-                    arguments,
-                    () => Dispatcher
-                        .InvokeAsync(RestoreLockAfterCancelledShutdownOnDispatcherAsync)
-                        .Task
-                        .Unwrap())
-                .ConfigureAwait(true);
-        }
         catch (Exception exception)
         {
-            ReportOperationFailure(
-                "Windows 종료 취소 뒤 잠금 화면을 다시 시작하지 못했습니다.",
-                exception);
+            Trace.TraceError("The system shutdown cancellation watchdog failed: {0}", exception);
+            if (_lockConditionRequired && !IsShuttingDown)
+            {
+                await RestoreRequiredOverlayBestEffortAsync().ConfigureAwait(true);
+            }
+        }
+        finally
+        {
+            if (ReferenceEquals(_systemShutdownWatchdog, cancellation))
+            {
+                _systemShutdownWatchdog = null;
+                cancellation.Dispose();
+                if (!IsShuttingDown)
+                {
+                    _systemShutdownRequestInProgress = false;
+                    _overlayPort?.SetSystemShutdownEnabled(isEnabled: true);
+                }
+            }
         }
 #pragma warning restore CA1031
     }
 
-    private async Task RestoreLockAfterCancelledShutdownOnDispatcherAsync()
+    private void CancelSystemShutdownWatchdog()
     {
-        LockRuntimeUseCase runtime = _lockRuntime ??
-            throw new InvalidOperationException("The lock runtime is not initialized.");
-        WpfLockOverlayPort overlayPort = _overlayPort ??
-            throw new InvalidOperationException("The overlay port is not initialized.");
-
-        await runtime.RequestLockAsync().ConfigureAwait(true);
-        _mainWindowViewModel?.RefreshRuntimeState();
-        overlayPort.ReportOperationFailure(
-            "Windows 종료가 취소되어 잠금 화면을 다시 적용했습니다.");
-    }
-
-    private async Task RequestExitAsync()
-    {
-        if (_exitRequestInProgress ||
-            _systemShutdownRequestInProgress ||
-            _shutdownAwaitingSessionEnd ||
-            IsShuttingDown)
+        CancellationTokenSource? cancellation = _systemShutdownWatchdog;
+        _systemShutdownWatchdog = null;
+        if (cancellation is null)
         {
             return;
         }
 
-        LockRuntimeUseCase runtime = _lockRuntime ??
-            throw new InvalidOperationException("The lock runtime is not initialized.");
+        cancellation.Cancel();
+        cancellation.Dispose();
+    }
+
+    private async Task RequestExitFromTrayAsync()
+    {
+        if (_exitRequestInProgress || _systemShutdownRequestInProgress || IsShuttingDown)
+        {
+            return;
+        }
+
+        MessageBoxResult result = System.Windows.MessageBox.Show(
+            "프로그램이 종료되면 수면 시간을 감지할 수 없습니다. 정말로 종료하시겠습니까?",
+            "ZARA",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        if (result != MessageBoxResult.Yes)
+        {
+            return;
+        }
 
         _exitRequestInProgress = true;
         try
         {
+            LockRuntimeUseCase runtime = GetLockRuntime();
+            RestartContinuityUseCase continuity = GetRestartContinuity();
+
             await runtime.PrepareForExitAsync().ConfigureAwait(true);
-            _mainWindowViewModel?.RefreshRuntimeState();
+            _ = await continuity
+                .PublishOverlayProjectionAsync(OverlayProjectionState.Hidden)
+                .ConfigureAwait(true);
+            _ = await continuity.ReleaseForExplicitExitAsync().ConfigureAwait(true);
             IsShuttingDown = true;
-            Shutdown();
+            CancelSystemShutdownWatchdog();
+            Shutdown(SupervisionProtocol.ExplicitExitCode);
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("The explicit desktop exit failed: {0}", exception);
+            if (_lockConditionRequired)
+            {
+                await RestoreRequiredOverlayBestEffortAsync().ConfigureAwait(true);
+            }
         }
         finally
         {
@@ -493,21 +487,9 @@ public partial class App : System.Windows.Application, IDisposable
         }
     }
 
-    private async Task RequestExitFromTrayAsync()
-    {
-        try
-        {
-            await RequestExitAsync().ConfigureAwait(true);
-        }
-        catch (Exception exception)
-        {
-            ReportOperationFailure("안전하게 종료하지 못했습니다.", exception);
-        }
-    }
-
     private async void OnOverlayProjectionFaulted(object? sender, OverlayProjectionFaultEventArgs e)
     {
-#pragma warning disable CA1031 // This UI event boundary must not crash before safety unlock remains available.
+#pragma warning disable CA1031 // Projection faults must preserve the continuity lease and UI loop.
         try
         {
             if (_lockRuntime is not null)
@@ -517,40 +499,113 @@ public partial class App : System.Windows.Application, IDisposable
                     .ConfigureAwait(true);
             }
 
-            ReportOperationFailure(
-                "화면 구성이 변경된 뒤 오버레이를 다시 맞추지 못했습니다. 잠금 화면의 복구 수단을 사용하십시오.",
-                e.Exception);
+            await TryPublishOverlayProjectionAsync(OverlayProjectionState.Unknown)
+                .ConfigureAwait(true);
+            Trace.TraceError("The overlay projection became invalid: {0}", e.Exception);
         }
-        catch (Exception reportingException)
+        catch (Exception exception)
         {
-            ReportOperationFailure(
-                "오버레이 실패 상태를 기록하지 못했습니다. 잠금 화면의 복구 수단을 사용하십시오.",
-                reportingException);
+            Trace.TraceError("Overlay fault reconciliation failed: {0}", exception);
         }
 #pragma warning restore CA1031
     }
 
-    private void ReportOperationFailure(string context, Exception exception)
+    private async Task PublishCurrentProjectionBestEffortAsync()
     {
-        _mainWindowViewModel?.ReportOperationFailure(context, exception);
-        ShowMainWindow();
+        RuntimeState state = GetLockRuntime().CurrentState;
+        await TryPublishOverlayProjectionAsync(state.OverlayProjection).ConfigureAwait(true);
     }
 
-    private string GetSystemShutdownFailureContext()
+    private async Task RestoreRequiredOverlayBestEffortAsync()
     {
-        RuntimeState? state = _lockRuntime?.CurrentState;
-        return state switch
+#pragma warning disable CA1031 // Explicit-exit rollback is best effort and preserves the original failure.
+        try
         {
-            { DesiredLock: LockState.Locked, OverlayProjection: OverlayProjectionState.Visible } =>
-                "시스템 종료를 요청하지 못했습니다. 잠금 화면은 현재 유지되고 있습니다.",
-            { DesiredLock: LockState.Unlocked, OverlayProjection: OverlayProjectionState.Hidden } =>
-                "시스템 종료를 요청하지 못했습니다. 현재 잠금은 해제되어 있습니다.",
-            _ => "시스템 종료와 잠금 화면 복구 결과를 확인할 수 없습니다.",
-        };
+            await RequireOverlayProjectionAsync().ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("The required overlay could not be restored: {0}", exception);
+        }
+#pragma warning restore CA1031
+    }
+
+    private async Task TryPublishOverlayProjectionAsync(OverlayProjectionState projection)
+    {
+#pragma warning disable CA1031 // Diagnostic continuity updates must not replace the primary result.
+        try
+        {
+            if (_restartContinuity is not null && !_restartContinuity.IsReleased)
+            {
+                _ = await _restartContinuity
+                    .PublishOverlayProjectionAsync(projection, CancellationToken.None)
+                    .ConfigureAwait(true);
+            }
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("The overlay projection lease update failed: {0}", exception);
+        }
+#pragma warning restore CA1031
+    }
+
+    private async Task TryPublishRestartSettingAsync(bool restartWhenAvailable)
+    {
+#pragma warning disable CA1031 // Rollback is best effort and preserves the settings write failure.
+        try
+        {
+            _ = await GetRestartContinuity()
+                .PublishRestartWhenAvailableAsync(restartWhenAvailable, CancellationToken.None)
+                .ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("The restart-setting lease rollback failed: {0}", exception);
+        }
+#pragma warning restore CA1031
+    }
+
+    private async Task TrySaveSettingsAsync(DesktopRestartSettings settings)
+    {
+#pragma warning disable CA1031 // Rollback is best effort and preserves the lease failure.
+        try
+        {
+            if (_settingsStore is not null)
+            {
+                await _settingsStore.SaveAsync(settings, CancellationToken.None)
+                    .ConfigureAwait(true);
+            }
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("The restart-setting file rollback failed: {0}", exception);
+        }
+#pragma warning restore CA1031
+    }
+
+    private LockRuntimeUseCase GetLockRuntime() => _lockRuntime ??
+        throw new InvalidOperationException("The lock runtime is not initialized.");
+
+    private RestartContinuityUseCase GetRestartContinuity() => _restartContinuity ??
+        throw new InvalidOperationException("Restart continuity is not initialized.");
+
+    private void ThrowIfShuttingDown()
+    {
+        if (IsShuttingDown || _exitRequestInProgress || _systemShutdownRequestInProgress)
+        {
+            throw new InvalidOperationException("The desktop process is shutting down.");
+        }
     }
 
     private void DisposeOwnedResources()
     {
+        if (Interlocked.Exchange(ref _disposeState, 1) != 0)
+        {
+            return;
+        }
+
+        CancelSystemShutdownWatchdog();
+
         if (_overlayPort is not null)
         {
             _overlayPort.ProjectionFaulted -= OnOverlayProjectionFaulted;
@@ -563,11 +618,9 @@ public partial class App : System.Windows.Application, IDisposable
         _applicationIcon?.Dispose();
         _applicationIcon = null;
 
-        _shutdownGuard?.Dispose();
-        _shutdownGuard = null;
-
         _systemShutdown?.Dispose();
         _systemShutdown = null;
+        _shutdownCancellationWatchdog = null;
 
         _lockRuntime?.Dispose();
         _lockRuntime = null;
@@ -577,5 +630,26 @@ public partial class App : System.Windows.Application, IDisposable
 
         _displayTopology?.Dispose();
         _displayTopology = null;
+
+        _restartContinuity?.Dispose();
+        _restartContinuity = null;
+
+#pragma warning disable CA1031 // Process teardown must release every remaining owned resource.
+        try
+        {
+            if (_supervisionConnection is not null)
+            {
+                _supervisionConnection.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            }
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("The supervision connection did not close cleanly: {0}", exception);
+        }
+#pragma warning restore CA1031
+        _supervisionConnection = null;
+
+        _settingsStore?.Dispose();
+        _settingsStore = null;
     }
 }
