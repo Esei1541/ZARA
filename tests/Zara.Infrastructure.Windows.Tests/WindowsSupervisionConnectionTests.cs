@@ -109,7 +109,6 @@ public sealed class WindowsSupervisionConnectionTests
         [
             valid with { ServiceProcessId = valid.PipeServerProcessId + 1 },
             valid with { ServiceState = 1 },
-            valid with { SessionId = 1 },
             valid with { ServiceAccountName = "NT AUTHORITY\\LocalService" },
             valid with
             {
@@ -125,6 +124,39 @@ public sealed class WindowsSupervisionConnectionTests
         {
             Assert.ThrowsExactly<InvalidDataException>(
                 () => WindowsSupervisionServerVerifier.ValidateIdentity(identity, expectedPath));
+        }
+    }
+
+    [TestMethod]
+    public void ServerIdentityValidationRejectsNonDedicatedServiceTypesFromStatusOrConfiguration()
+    {
+        string expectedPath = Path.Combine(
+            Path.GetTempPath(),
+            "ZARA",
+            WindowsSupervisionServerVerifier.ServiceExecutableName);
+        SupervisionServerIdentity valid = CreateValidServerIdentity(expectedPath);
+
+        (uint StatusType, uint ConfiguredType)[] invalidServiceTypes =
+        [
+            (0x00000020, 0x00000010),
+            (0x00000010, 0x00000020),
+            (0x00000040, 0x00000010),
+            (0x00000010, 0x00000040),
+            (0x00000110, 0x00000010),
+            (0x00000010, 0x00000110),
+            (0x00000020, 0x00000110),
+        ];
+
+        foreach ((uint statusType, uint configuredType) in invalidServiceTypes)
+        {
+            Assert.ThrowsExactly<InvalidDataException>(() =>
+                WindowsSupervisionServerVerifier.ValidateIdentity(
+                    valid with
+                    {
+                        ServiceType = statusType,
+                        ConfiguredServiceType = configuredType,
+                    },
+                    expectedPath));
         }
     }
 
@@ -433,7 +465,8 @@ public sealed class WindowsSupervisionConnectionTests
             PipeServerProcessId: 41,
             ServiceProcessId: 41,
             ServiceState: 4,
-            SessionId: 0,
+            ServiceType: 0x00000010,
+            ConfiguredServiceType: 0x00000010,
             ServiceAccountName: "LocalSystem",
             ServiceBinaryPath: serviceBinaryPath);
 

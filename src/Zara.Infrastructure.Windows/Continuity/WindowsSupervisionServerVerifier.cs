@@ -24,7 +24,8 @@ internal readonly record struct SupervisionServerIdentity(
     uint PipeServerProcessId,
     uint ServiceProcessId,
     uint ServiceState,
-    uint SessionId,
+    uint ServiceType,
+    uint ConfiguredServiceType,
     string ServiceAccountName,
     string ServiceBinaryPath);
 
@@ -41,6 +42,7 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
     private const uint ServiceQueryStatus = 0x0004;
     private const int ScStatusProcessInfo = 0;
     private const uint ServiceRunning = 0x00000004;
+    private const uint ServiceWin32OwnProcess = 0x00000010;
     private const int ErrorInsufficientBuffer = 122;
     private const string LocalSystemAccountName = "LocalSystem";
 
@@ -101,7 +103,8 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
             pipeServerProcessId,
             service.ProcessId,
             service.State,
-            GetProcessSessionId(pipeServerProcessId),
+            service.ServiceType,
+            service.ConfiguredServiceType,
             service.AccountName,
             service.BinaryPath);
 
@@ -129,10 +132,11 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
                 "The supervision pipe server did not match the SCM Service process.");
         }
 
-        if (identity.SessionId != 0)
+        if (identity.ServiceType != ServiceWin32OwnProcess ||
+            identity.ConfiguredServiceType != ServiceWin32OwnProcess)
         {
             throw new InvalidDataException(
-                "The supervision pipe server was not running in Session 0.");
+                "The registered ZARA Service was not a non-interactive dedicated process.");
         }
 
         if (!string.Equals(
@@ -194,17 +198,6 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
         }
     }
 
-    private static uint GetProcessSessionId(uint processId)
-    {
-        if (ProcessIdToSessionId(processId, out uint sessionId) == 0)
-        {
-            throw CreateLastWin32Exception(
-                "Windows did not provide the supervision pipe server session.");
-        }
-
-        return sessionId;
-    }
-
     private static RegisteredServiceIdentity QueryRegisteredServiceIdentity()
     {
         nint managerValue = OpenSCManager(
@@ -240,10 +233,13 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
             using (service)
             {
                 ServiceStatusProcess status = QueryServiceProcessStatus(service);
-                (string binaryPath, string accountName) = QueryServiceConfiguration(service);
+                (string binaryPath, string accountName, uint serviceType) =
+                    QueryServiceConfiguration(service);
                 return new RegisteredServiceIdentity(
                     status.ProcessId,
                     status.CurrentState,
+                    status.ServiceType,
+                    serviceType,
                     accountName,
                     binaryPath);
             }
@@ -276,7 +272,8 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
         }
     }
 
-    private static (string BinaryPath, string AccountName) QueryServiceConfiguration(
+    private static (string BinaryPath, string AccountName, uint ServiceType)
+        QueryServiceConfiguration(
         SafeServiceControlHandle service)
     {
         if (QueryServiceConfigNative(
@@ -318,7 +315,7 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
             string accountName = Marshal.PtrToStringUni(configuration.ServiceStartName) ??
                 throw new InvalidDataException(
                     "The registered ZARA Service account was empty.");
-            return (binaryPath, accountName);
+            return (binaryPath, accountName, configuration.ServiceType);
         }
         finally
         {
@@ -334,6 +331,8 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
     private readonly record struct RegisteredServiceIdentity(
         uint ProcessId,
         uint State,
+        uint ServiceType,
+        uint ConfiguredServiceType,
         string AccountName,
         string BinaryPath);
 
@@ -383,11 +382,6 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
     private static partial int GetNamedPipeServerProcessId(
         nint pipe,
         out uint serverProcessId);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial int ProcessIdToSessionId(
-        uint processId,
-        out uint sessionId);
 
     [LibraryImport(
         "advapi32.dll",
