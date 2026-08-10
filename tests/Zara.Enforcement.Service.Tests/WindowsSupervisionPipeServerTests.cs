@@ -62,6 +62,105 @@ public sealed class WindowsSupervisionPipeServerTests
     }
 
     [TestMethod]
+    public async Task TokenlessRegistrationCannotReplacePendingInitialServiceLaunch()
+    {
+        var source = CreateInitialLaunchSource();
+        var registry = new DesktopLaunchHandshakeRegistry();
+        var server = CreateServer(source, registry, requireInitialServiceLaunch: true);
+        var channel = new ScriptedChannel();
+        var lifetime = new FakeDesktopLifetime(processId: 114);
+
+        await server.HandleAuthenticatedConnectionAsync(
+            channel,
+            lifetime,
+            CreateRegistration(114, restartRequired: false, recoverLock: false, launchToken: null),
+            CancellationToken.None);
+
+        SupervisionResponse response = AssertSingleResponse(channel);
+        Assert.AreEqual(SupervisionResponseKind.Rejected, response.Kind);
+        Assert.AreEqual("SERVICE_LAUNCH_TOKEN_REQUIRED", response.ErrorCode);
+        Assert.IsTrue(source.Current.RestartRequired);
+        Assert.AreEqual(0, lifetime.WaitCount);
+    }
+
+    [TestMethod]
+    public async Task InitialServiceLaunchAcceptsExactTokenAndPreservesExplicitExit()
+    {
+        var source = CreateInitialLaunchSource();
+        var registry = new DesktopLaunchHandshakeRegistry();
+        var server = CreateServer(source, registry, requireInitialServiceLaunch: true);
+        await using IDesktopLaunchHandshake handshake = await registry.CreateAsync(
+            SessionId,
+            CancellationToken.None);
+        Assert.IsTrue(handshake.TryBindProcess(processId: 115));
+
+        var update = new SupervisionRequest(
+            SupervisionProtocol.CurrentVersion,
+            SupervisionRequestKind.UpdateLease,
+            Process: null,
+            new SupervisionLease(1, true, false),
+            Revision: null,
+            LaunchToken: null);
+        var release = new SupervisionRequest(
+            SupervisionProtocol.CurrentVersion,
+            SupervisionRequestKind.ReleaseForExplicitExit,
+            Process: null,
+            new SupervisionLease(2, false, false),
+            Revision: null,
+            LaunchToken: null);
+        var channel = new ScriptedChannel([
+            update,
+            CreateHealthyRequest(revision: 1),
+            release,
+        ]);
+        var lifetime = new FakeDesktopLifetime(processId: 115);
+        lifetime.Exit(SupervisionProtocol.ExplicitExitCode);
+
+        await server.HandleAuthenticatedConnectionAsync(
+            channel,
+            lifetime,
+            CreateRegistration(115, restartRequired: true, recoverLock: false, handshake.OneTimeToken),
+            CancellationToken.None);
+
+        SupervisionResponse[] responses = channel.Responses.ToArray();
+        Assert.HasCount(4, responses);
+        Assert.AreEqual(SupervisionResponseKind.Registered, responses[0].Kind);
+        Assert.IsFalse(responses[0].RecoverLockOnStart);
+        Assert.AreEqual(SupervisionResponseKind.LeaseAcknowledged, responses[1].Kind);
+        Assert.AreEqual(SupervisionResponseKind.HealthyAcknowledged, responses[2].Kind);
+        Assert.AreEqual(SupervisionResponseKind.ExitAcknowledged, responses[3].Kind);
+        await handshake.WaitForHealthyAsync(CancellationToken.None);
+        Assert.IsFalse(source.Current.RestartRequired);
+        Assert.AreEqual(SupervisionDirectiveReason.ExplicitRelease, source.Current.Reason);
+    }
+
+    [TestMethod]
+    public async Task UnhealthyInitialServiceLaunchRemainsRequiredAfterProcessExit()
+    {
+        var source = CreateInitialLaunchSource();
+        var registry = new DesktopLaunchHandshakeRegistry();
+        var server = CreateServer(source, registry, requireInitialServiceLaunch: true);
+        await using IDesktopLaunchHandshake handshake = await registry.CreateAsync(
+            SessionId,
+            CancellationToken.None);
+        Assert.IsTrue(handshake.TryBindProcess(processId: 116));
+
+        var channel = new ScriptedChannel();
+        var lifetime = new FakeDesktopLifetime(processId: 116);
+        lifetime.Exit(exitCode: 1);
+
+        await server.HandleAuthenticatedConnectionAsync(
+            channel,
+            lifetime,
+            CreateRegistration(116, restartRequired: false, recoverLock: false, handshake.OneTimeToken),
+            CancellationToken.None);
+
+        Assert.AreEqual(SupervisionResponseKind.Registered, AssertSingleResponse(channel).Kind);
+        Assert.IsTrue(source.Current.RestartRequired);
+        Assert.AreEqual(SupervisionDirectiveReason.LeaseUpdated, source.Current.Reason);
+    }
+
+    [TestMethod]
     public async Task ExitAcknowledgementFailureDoesNotSuppressRequiredRecovery()
     {
         var source = CreateReleasedSource();
@@ -287,14 +386,19 @@ public sealed class WindowsSupervisionPipeServerTests
             RestartRequired: false,
             SupervisionDirectiveReason.ServiceStarted));
 
+    private static LatestSupervisionCommandSource CreateInitialLaunchSource() =>
+        new(WindowsServiceHost.CreateInitialSupervisionDirective());
+
     private static WindowsSupervisionPipeServer CreateServer(
         LatestSupervisionCommandSource source,
-        DesktopLaunchHandshakeRegistry registry) =>
+        DesktopLaunchHandshakeRegistry registry,
+        bool requireInitialServiceLaunch = false) =>
         new(
             source,
             registry,
             SessionId,
-            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null));
+            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null),
+            requireInitialServiceLaunch: requireInitialServiceLaunch);
 
     private static SupervisionRequest CreateRegistration(
         int processId,
@@ -312,6 +416,15 @@ public sealed class WindowsSupervisionPipeServerTests
             new SupervisionLease(0, restartRequired, recoverLock),
             Revision: null,
             launchToken);
+
+    private static SupervisionRequest CreateHealthyRequest(long revision) =>
+        new(
+            SupervisionProtocol.CurrentVersion,
+            SupervisionRequestKind.ReportHealthy,
+            Process: null,
+            Lease: null,
+            revision,
+            LaunchToken: null);
 
     private static SupervisionResponse AssertSingleResponse(ScriptedChannel channel)
     {

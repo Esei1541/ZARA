@@ -107,10 +107,7 @@ internal static class WindowsServiceHost
                     .GetResult();
                 _targetSessionId = target.SessionId;
                 _commandSource = new LatestSupervisionCommandSource(
-                    new SupervisionDirective(
-                        Revision: 0,
-                        RestartRequired: false,
-                        SupervisionDirectiveReason.ServiceStarted));
+                    CreateInitialSupervisionDirective());
                 _handshakeRegistry = new DesktopLaunchHandshakeRegistry();
                 var launcher = new WindowsDesktopProcessLauncher(
                     _targetSessionId,
@@ -123,7 +120,8 @@ internal static class WindowsServiceHost
                     _commandSource,
                     _handshakeRegistry,
                     _targetSessionId,
-                    target.UserSid);
+                    target.UserSid,
+                    requireInitialServiceLaunch: true);
 
                 RunComponentsAsync(
                         supervisor,
@@ -180,8 +178,8 @@ internal static class WindowsServiceHost
     {
         using var componentCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             serviceCancellationToken);
-        Task supervision = supervisor.RunAsync(componentCancellation.Token);
         Task transport = pipeServer.RunAsync(componentCancellation.Token);
+        Task supervision = supervisor.RunAsync(componentCancellation.Token);
         Task completed = await Task.WhenAny(supervision, transport).ConfigureAwait(false);
 
         if (!serviceCancellationToken.IsCancellationRequested)
@@ -253,8 +251,18 @@ internal static class WindowsServiceHost
     }
 
     /// <summary>
+    /// Builds the first supervision instruction after a boot-time Service finds an interactive
+    /// console user. The Service starts the Desktop only; the Desktop later evaluates all product
+    /// settings and publishes the resulting restart lease.
+    /// </summary>
+    internal static SupervisionDirective CreateInitialSupervisionDirective() => new(
+        Revision: 0,
+        RestartRequired: true,
+        SupervisionDirectiveReason.ServiceStarted);
+
+    /// <summary>
     /// Keeps an auto-started Service alive in Session 0 until an interactive console logon has a
-    /// queryable user token. It does not publish a restart directive or launch a desktop.
+    /// queryable user token. The caller starts the first Desktop only after this method returns.
     /// </summary>
     internal static async Task<ActiveConsoleSessionTarget> WaitForActiveConsoleSessionAsync(
         Func<ActiveConsoleSessionTarget?> readTarget,

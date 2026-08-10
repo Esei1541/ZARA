@@ -144,7 +144,7 @@ internal sealed class WindowsDesktopProcessLauncher : IDesktopProcessLauncher
     {
         nint desktopName = Marshal.StringToHGlobalUni(InteractiveDesktop);
         nint commandLine = Marshal.StringToHGlobalUni(
-            $"\"{_desktopPath}\" {SupervisionProtocol.RecoverySwitch} " +
+            $"\"{_desktopPath}\" {SupervisionProtocol.ServiceLaunchSwitch} " +
             handshake.OneTimeToken);
 
         try

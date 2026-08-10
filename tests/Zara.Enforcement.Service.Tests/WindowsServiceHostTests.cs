@@ -1,11 +1,22 @@
 using System.Security.Principal;
 using Zara.Enforcement.Service;
+using Zara.Enforcement.Service.Supervision;
 
 namespace Zara.Enforcement.Service.Tests;
 
 [TestClass]
 public sealed class WindowsServiceHostTests
 {
+    [TestMethod]
+    public void InitialDirectiveRequiresFirstDesktopLaunchAfterInteractiveLogon()
+    {
+        SupervisionDirective directive = WindowsServiceHost.CreateInitialSupervisionDirective();
+
+        Assert.AreEqual(0, directive.Revision);
+        Assert.IsTrue(directive.RestartRequired);
+        Assert.AreEqual(SupervisionDirectiveReason.ServiceStarted, directive.Reason);
+    }
+
     [TestMethod]
     public async Task WaitForActiveSessionKeepsServiceIdleUntilTargetExists()
     {

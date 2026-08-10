@@ -24,6 +24,10 @@ internal sealed class WindowsSupervisionPipeServer
     private readonly int _targetSessionId;
     private readonly SecurityIdentifier _targetUserSid;
     private readonly string _desktopExecutablePath;
+
+    // The boot-time Service must not let a tokenless desktop claim the first generation before the
+    // exact child created with CreateProcessAsUser has registered and reported healthy.
+    private bool _initialServiceLaunchRequired;
     private SupervisionLease? _lastAcceptedLease;
 
     public WindowsSupervisionPipeServer(
@@ -31,7 +35,8 @@ internal sealed class WindowsSupervisionPipeServer
         DesktopLaunchHandshakeRegistry handshakeRegistry,
         int targetSessionId,
         SecurityIdentifier targetUserSid,
-        string? installDirectory = null)
+        string? installDirectory = null,
+        bool requireInitialServiceLaunch = false)
     {
         ArgumentNullException.ThrowIfNull(commandSource);
         ArgumentNullException.ThrowIfNull(handshakeRegistry);
@@ -42,6 +47,7 @@ internal sealed class WindowsSupervisionPipeServer
         _handshakeRegistry = handshakeRegistry;
         _targetSessionId = targetSessionId;
         _targetUserSid = targetUserSid;
+        _initialServiceLaunchRequired = requireInitialServiceLaunch;
         string directory = Path.TrimEndingDirectorySeparator(
             Path.GetFullPath(installDirectory ?? AppContext.BaseDirectory));
         _desktopExecutablePath = Path.GetFullPath(
@@ -131,7 +137,8 @@ internal sealed class WindowsSupervisionPipeServer
         ValidateRegistrationShape(registration);
 
         int processId = clientProcess.ProcessId;
-        bool recoveryLaunch = registration.LaunchToken is not null;
+        bool serviceLaunch = registration.LaunchToken is not null;
+        bool initialServiceLaunch = _initialServiceLaunchRequired;
         if (_commandSource.IsSessionEnding)
         {
             await WriteRejectedAsync(channel, "SESSION_ENDED", serviceCancellationToken)
@@ -139,18 +146,32 @@ internal sealed class WindowsSupervisionPipeServer
             return;
         }
 
-        if (recoveryLaunch)
+        if (serviceLaunch)
         {
-            if (_lastAcceptedLease is null ||
-                !_handshakeRegistry.IsPendingForProcess(
+            if (!_handshakeRegistry.IsPendingForProcess(
                     registration.LaunchToken!,
                     _targetSessionId,
-                    processId))
+                    processId) ||
+                (_lastAcceptedLease is null && !initialServiceLaunch))
             {
                 await WriteRejectedAsync(channel, "INVALID_LAUNCH_TOKEN", serviceCancellationToken)
                     .ConfigureAwait(false);
                 return;
             }
+
+            if (_lastAcceptedLease is null)
+            {
+                _lastAcceptedLease = registration.Lease;
+            }
+        }
+        else if (initialServiceLaunch)
+        {
+            await WriteRejectedAsync(
+                    channel,
+                    "SERVICE_LAUNCH_TOKEN_REQUIRED",
+                    serviceCancellationToken)
+                .ConfigureAwait(false);
+            return;
         }
         else if (_lastAcceptedLease?.RestartRequiredAfterExit == true &&
                  _commandSource.Current.RestartRequired)
@@ -179,8 +200,8 @@ internal sealed class WindowsSupervisionPipeServer
                     new SupervisionResponse(
                         SupervisionProtocol.CurrentVersion,
                         SupervisionResponseKind.Registered,
-                        AcknowledgedRevision: recoveryLaunch ? 0 : registration.Lease!.Revision,
-                        RecoverLockOnStart: recoveryLaunch &&
+                        AcknowledgedRevision: serviceLaunch ? 0 : registration.Lease!.Revision,
+                        RecoverLockOnStart: serviceLaunch &&
                             _lastAcceptedLease!.RecoverLockOnRestart,
                         ErrorCode: null),
                     serviceCancellationToken)
@@ -247,7 +268,7 @@ internal sealed class WindowsSupervisionPipeServer
 
                     case SupervisionRequestKind.ReportHealthy:
                         ValidateRevisionRequest(request, generationRevision);
-                        if (recoveryLaunch &&
+                        if (serviceLaunch &&
                             !_handshakeRegistry.TryReportHealthy(
                                 registration.LaunchToken!,
                                 _targetSessionId,
@@ -261,13 +282,18 @@ internal sealed class WindowsSupervisionPipeServer
                             return;
                         }
 
-                        recoveryLaunch = false;
                         await WriteAcknowledgementAsync(
                                 channel,
                                 SupervisionResponseKind.HealthyAcknowledged,
                                 generationRevision,
                                 serviceCancellationToken)
                             .ConfigureAwait(false);
+                        if (initialServiceLaunch)
+                        {
+                            _initialServiceLaunchRequired = false;
+                        }
+
+                        serviceLaunch = false;
                         break;
 
                     case SupervisionRequestKind.ReleaseForExplicitExit:
@@ -311,7 +337,8 @@ internal sealed class WindowsSupervisionPipeServer
 
                 bool restartRequired =
                     !explicitExitCompleted &&
-                    _lastAcceptedLease?.RestartRequiredAfterExit == true;
+                    (_initialServiceLaunchRequired ||
+                     _lastAcceptedLease?.RestartRequiredAfterExit == true);
                 _commandSource.PublishNext(
                     restartRequired,
                     explicitExitCompleted

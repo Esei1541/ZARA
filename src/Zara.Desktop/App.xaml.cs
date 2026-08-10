@@ -178,7 +178,7 @@ public partial class App : System.Windows.Application, IDisposable
         if (arguments.Count != 2 ||
             !string.Equals(
                 arguments[0],
-                SupervisionProtocol.RecoverySwitch,
+                SupervisionProtocol.ServiceLaunchSwitch,
                 StringComparison.Ordinal) ||
             arguments[1].Length != 64 ||
             !arguments[1].All(Uri.IsHexDigit))

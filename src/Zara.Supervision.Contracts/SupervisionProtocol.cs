@@ -11,8 +11,17 @@ public static class SupervisionProtocol
     /// <summary>The machine-local named pipe owned by the ZARA Service.</summary>
     public const string PipeName = "ZARA.Supervision.v2";
 
-    /// <summary>Marks a desktop process launched by the Service after a supervised exit.</summary>
-    public const string RecoverySwitch = "--zara-service-recovery";
+    /// <summary>
+    /// Marks a desktop process launched by the Service, either for the first interactive logon or
+    /// after a supervised exit. The one-time launch token proves the exact process generation.
+    /// </summary>
+    public const string ServiceLaunchSwitch = "--zara-service-recovery";
+
+    /// <summary>
+    /// Compatibility alias for callers built before the Service could start the first desktop after
+    /// interactive logon.
+    /// </summary>
+    public const string RecoverySwitch = ServiceLaunchSwitch;
 
     /// <summary>
     /// Marks the exact process exit that follows an acknowledged explicit-exit release. The Service
@@ -95,8 +104,8 @@ public sealed record SupervisionLease(
 /// prevents a confirmation from carrying a second, different lease payload.
 /// </param>
 /// <param name="LaunchToken">
-/// An optional Service recovery token for <see cref="SupervisionRequestKind.Register" /> and null
-/// for every other kind.
+/// An optional one-time token for a process launched by the Service. It is used only for
+/// <see cref="SupervisionRequestKind.Register" /> and is null for every other kind.
 /// </param>
 /// <remarks>
 /// A registration lease has revision zero and is accepted atomically with the process identity.
