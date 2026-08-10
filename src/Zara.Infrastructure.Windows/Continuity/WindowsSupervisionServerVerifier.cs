@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
-using System.Security.Principal;
 using Microsoft.Win32.SafeHandles;
 
 namespace Zara.Infrastructure.Windows.Continuity;
@@ -26,28 +25,31 @@ internal readonly record struct SupervisionServerIdentity(
     uint ServiceProcessId,
     uint ServiceState,
     uint SessionId,
-    string UserSid,
-    string ExecutablePath);
+    string ServiceAccountName,
+    string ServiceBinaryPath);
 
 /// <summary>
-/// Authenticates the local named-pipe server against SCM and the exact protected Service process.
+/// Authenticates the local named-pipe server against SCM and the exact registered Service.
 /// </summary>
 internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionServerVerifier
 {
     internal const string ServiceName = "ZARA.Enforcement";
     internal const string ServiceExecutableName = "Zara.Enforcement.Service.exe";
 
-    private const uint ProcessQueryLimitedInformation = 0x1000;
-    private const uint TokenQuery = 0x0008;
     private const uint ScManagerConnect = 0x0001;
+    private const uint ServiceQueryConfig = 0x0001;
     private const uint ServiceQueryStatus = 0x0004;
     private const int ScStatusProcessInfo = 0;
     private const uint ServiceRunning = 0x00000004;
-    private const int MaximumExecutablePathCharacters = 32_768;
+    private const int ErrorInsufficientBuffer = 122;
+    private const string LocalSystemAccountName = "LocalSystem";
 
-    private static readonly string LocalSystemSid = new SecurityIdentifier(
-        WellKnownSidType.LocalSystemSid,
-        domainSid: null).Value;
+    /// <summary>
+    /// The complete Service access mask used by the desktop verifier. Both rights are query-only
+    /// and are available to a standard user under the Service's default SCM security descriptor.
+    /// </summary>
+    internal static readonly uint RequiredServiceAccess =
+        ServiceQueryConfig | ServiceQueryStatus;
 
     private readonly string _expectedServicePath;
 
@@ -94,15 +96,14 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
                 "Windows returned an invalid supervision pipe server process identifier.");
         }
 
-        using SafeKernelHandle process = OpenRequiredProcess(pipeServerProcessId);
-        ServiceStatusProcess serviceStatus = QueryServiceStatus();
+        RegisteredServiceIdentity service = QueryRegisteredServiceIdentity();
         var identity = new SupervisionServerIdentity(
             pipeServerProcessId,
-            serviceStatus.ProcessId,
-            serviceStatus.CurrentState,
+            service.ProcessId,
+            service.State,
             GetProcessSessionId(pipeServerProcessId),
-            GetProcessUserSid(process),
-            GetProcessExecutablePath(process));
+            service.AccountName,
+            service.BinaryPath);
 
         ValidateIdentity(identity, _expectedServicePath);
     }
@@ -134,40 +135,63 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
                 "The supervision pipe server was not running in Session 0.");
         }
 
-        if (!string.Equals(identity.UserSid, LocalSystemSid, StringComparison.Ordinal))
+        if (!string.Equals(
+                identity.ServiceAccountName,
+                LocalSystemAccountName,
+                StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                "The supervision pipe server was not running as LocalSystem.");
+                "The registered ZARA Service account was not LocalSystem.");
         }
 
-        if (string.IsNullOrWhiteSpace(identity.ExecutablePath) ||
-            !string.Equals(
-                Path.GetFullPath(identity.ExecutablePath),
+        string configuredPath = GetExactConfiguredExecutablePath(identity.ServiceBinaryPath);
+        if (!string.Equals(
+                configuredPath,
                 Path.GetFullPath(expectedServicePath),
                 StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
-                "The supervision pipe server executable path did not match ZARA Service.");
+                "The registered ZARA Service executable path did not match ZARA Service.");
         }
     }
 
-    private static SafeKernelHandle OpenRequiredProcess(uint processId)
+    private static string GetExactConfiguredExecutablePath(string binaryPath)
     {
-        nint processValue = OpenProcess(
-            ProcessQueryLimitedInformation,
-            inheritHandle: 0,
-            processId);
-        var process = new SafeKernelHandle(processValue, ownsHandle: true);
-        if (!process.IsInvalid)
+        if (string.IsNullOrWhiteSpace(binaryPath))
         {
-            return process;
+            throw new InvalidDataException(
+                "The registered ZARA Service executable path was empty.");
         }
 
-        int error = Marshal.GetLastPInvokeError();
-        process.Dispose();
-        throw new Win32Exception(
-            error,
-            "Windows denied limited identity access to the supervision pipe server.");
+        string candidate = binaryPath.Trim();
+        if (candidate[0] == '"')
+        {
+            if (candidate.Length < 2 || candidate[^1] != '"')
+            {
+                throw new InvalidDataException(
+                    "The registered ZARA Service binary path was not an exact executable path.");
+            }
+
+            candidate = candidate[1..^1];
+        }
+
+        if (string.IsNullOrWhiteSpace(candidate) || candidate.Contains('"'))
+        {
+            throw new InvalidDataException(
+                "The registered ZARA Service binary path was not an exact executable path.");
+        }
+
+        try
+        {
+            return Path.GetFullPath(candidate);
+        }
+        catch (Exception exception) when (
+            exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new InvalidDataException(
+                "The registered ZARA Service executable path was invalid.",
+                exception);
+        }
     }
 
     private static uint GetProcessSessionId(uint processId)
@@ -181,52 +205,7 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
         return sessionId;
     }
 
-    private static string GetProcessUserSid(SafeKernelHandle process)
-    {
-        if (OpenProcessToken(
-                process.DangerousGetHandle(),
-                TokenQuery,
-                out nint tokenValue) == 0)
-        {
-            throw CreateLastWin32Exception(
-                "Windows denied token identity access to the supervision pipe server.");
-        }
-
-        using var token = new SafeKernelHandle(tokenValue, ownsHandle: true);
-        using var identity = new WindowsIdentity(token.DangerousGetHandle());
-        return identity.User?.Value ??
-            throw new InvalidDataException(
-                "The supervision pipe server token did not contain a user SID.");
-    }
-
-    private static string GetProcessExecutablePath(SafeKernelHandle process)
-    {
-        nint buffer = Marshal.AllocHGlobal(
-            checked(MaximumExecutablePathCharacters * sizeof(char)));
-        try
-        {
-            uint length = MaximumExecutablePathCharacters;
-            if (QueryFullProcessImageName(
-                    process.DangerousGetHandle(),
-                    flags: 0,
-                    buffer,
-                    ref length) == 0)
-            {
-                throw CreateLastWin32Exception(
-                    "Windows did not provide the supervision pipe server executable path.");
-            }
-
-            return Marshal.PtrToStringUni(buffer, checked((int)length)) ??
-                throw new InvalidDataException(
-                    "The supervision pipe server executable path was empty.");
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
-        }
-    }
-
-    private static ServiceStatusProcess QueryServiceStatus()
+    private static RegisteredServiceIdentity QueryRegisteredServiceIdentity()
     {
         nint managerValue = OpenSCManager(
             machineName: null,
@@ -247,7 +226,7 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
             nint serviceValue = OpenService(
                 manager.DangerousGetHandle(),
                 ServiceName,
-                ServiceQueryStatus);
+                RequiredServiceAccess);
             var service = new SafeServiceControlHandle(serviceValue, ownsHandle: true);
             if (service.IsInvalid)
             {
@@ -255,33 +234,95 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
                 service.Dispose();
                 throw new Win32Exception(
                     error,
-                    "Windows did not open the registered ZARA Service.");
+                    "Windows did not open the registered ZARA Service for identity queries.");
             }
 
             using (service)
             {
-                int statusSize = Marshal.SizeOf<ServiceStatusProcess>();
-                nint statusBuffer = Marshal.AllocHGlobal(statusSize);
-                try
-                {
-                    if (QueryServiceStatusEx(
-                            service.DangerousGetHandle(),
-                            ScStatusProcessInfo,
-                            statusBuffer,
-                            checked((uint)statusSize),
-                            out _) == 0)
-                    {
-                        throw CreateLastWin32Exception(
-                            "Windows did not provide the ZARA Service process status.");
-                    }
-
-                    return Marshal.PtrToStructure<ServiceStatusProcess>(statusBuffer);
-                }
-                finally
-                {
-                    Marshal.FreeHGlobal(statusBuffer);
-                }
+                ServiceStatusProcess status = QueryServiceProcessStatus(service);
+                (string binaryPath, string accountName) = QueryServiceConfiguration(service);
+                return new RegisteredServiceIdentity(
+                    status.ProcessId,
+                    status.CurrentState,
+                    accountName,
+                    binaryPath);
             }
+        }
+    }
+
+    private static ServiceStatusProcess QueryServiceProcessStatus(
+        SafeServiceControlHandle service)
+    {
+        int statusSize = Marshal.SizeOf<ServiceStatusProcess>();
+        nint statusBuffer = Marshal.AllocHGlobal(statusSize);
+        try
+        {
+            if (QueryServiceStatusEx(
+                    service.DangerousGetHandle(),
+                    ScStatusProcessInfo,
+                    statusBuffer,
+                    checked((uint)statusSize),
+                    out _) == 0)
+            {
+                throw CreateLastWin32Exception(
+                    "Windows did not provide the ZARA Service process status.");
+            }
+
+            return Marshal.PtrToStructure<ServiceStatusProcess>(statusBuffer);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(statusBuffer);
+        }
+    }
+
+    private static (string BinaryPath, string AccountName) QueryServiceConfiguration(
+        SafeServiceControlHandle service)
+    {
+        if (QueryServiceConfigNative(
+                service.DangerousGetHandle(),
+                configuration: 0,
+                bufferSize: 0,
+                out uint bytesNeeded) != 0)
+        {
+            throw new InvalidDataException(
+                "Windows returned an invalid zero-length ZARA Service configuration.");
+        }
+
+        int error = Marshal.GetLastPInvokeError();
+        if (error != ErrorInsufficientBuffer || bytesNeeded == 0)
+        {
+            throw new Win32Exception(
+                error,
+                "Windows did not provide the required ZARA Service configuration size.");
+        }
+
+        nint configurationBuffer = Marshal.AllocHGlobal(checked((int)bytesNeeded));
+        try
+        {
+            if (QueryServiceConfigNative(
+                    service.DangerousGetHandle(),
+                    configurationBuffer,
+                    bytesNeeded,
+                    out _) == 0)
+            {
+                throw CreateLastWin32Exception(
+                    "Windows did not provide the registered ZARA Service configuration.");
+            }
+
+            ServiceConfiguration configuration =
+                Marshal.PtrToStructure<ServiceConfiguration>(configurationBuffer);
+            string binaryPath = Marshal.PtrToStringUni(configuration.BinaryPathName) ??
+                throw new InvalidDataException(
+                    "The registered ZARA Service executable path was empty.");
+            string accountName = Marshal.PtrToStringUni(configuration.ServiceStartName) ??
+                throw new InvalidDataException(
+                    "The registered ZARA Service account was empty.");
+            return (binaryPath, accountName);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(configurationBuffer);
         }
     }
 
@@ -289,6 +330,12 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
     {
         return new Win32Exception(Marshal.GetLastPInvokeError(), message);
     }
+
+    private readonly record struct RegisteredServiceIdentity(
+        uint ProcessId,
+        uint State,
+        string AccountName,
+        string BinaryPath);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct ServiceStatusProcess
@@ -304,18 +351,18 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
         internal uint ServiceFlags;
     }
 
-    private sealed class SafeKernelHandle : SafeHandleZeroOrMinusOneIsInvalid
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ServiceConfiguration
     {
-        internal SafeKernelHandle(nint handle, bool ownsHandle)
-            : base(ownsHandle)
-        {
-            SetHandle(handle);
-        }
-
-        protected override bool ReleaseHandle()
-        {
-            return CloseHandle(handle) != 0;
-        }
+        internal uint ServiceType;
+        internal uint StartType;
+        internal uint ErrorControl;
+        internal nint BinaryPathName;
+        internal nint LoadOrderGroup;
+        internal uint TagId;
+        internal nint Dependencies;
+        internal nint ServiceStartName;
+        internal nint DisplayName;
     }
 
     private sealed class SafeServiceControlHandle : SafeHandleZeroOrMinusOneIsInvalid
@@ -338,34 +385,9 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
         out uint serverProcessId);
 
     [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial nint OpenProcess(
-        uint desiredAccess,
-        int inheritHandle,
-        uint processId);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
     private static partial int ProcessIdToSessionId(
         uint processId,
         out uint sessionId);
-
-    [LibraryImport(
-        "kernel32.dll",
-        EntryPoint = "QueryFullProcessImageNameW",
-        SetLastError = true)]
-    private static partial int QueryFullProcessImageName(
-        nint process,
-        uint flags,
-        nint executableName,
-        ref uint size);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial int CloseHandle(nint handle);
-
-    [LibraryImport("advapi32.dll", SetLastError = true)]
-    private static partial int OpenProcessToken(
-        nint process,
-        uint desiredAccess,
-        out nint token);
 
     [LibraryImport(
         "advapi32.dll",
@@ -392,6 +414,16 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
         nint service,
         int informationLevel,
         nint buffer,
+        uint bufferSize,
+        out uint bytesNeeded);
+
+    [LibraryImport(
+        "advapi32.dll",
+        EntryPoint = "QueryServiceConfigW",
+        SetLastError = true)]
+    private static partial int QueryServiceConfigNative(
+        nint service,
+        nint configuration,
         uint bufferSize,
         out uint bytesNeeded);
 

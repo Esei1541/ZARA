@@ -101,7 +101,7 @@ public sealed class WindowsSupervisionConnectionTests
             Path.GetTempPath(),
             "ZARA",
             WindowsSupervisionServerVerifier.ServiceExecutableName);
-        SupervisionServerIdentity valid = CreateValidServerIdentity(expectedPath);
+        SupervisionServerIdentity valid = CreateValidServerIdentity($"\"{expectedPath}\"");
 
         WindowsSupervisionServerVerifier.ValidateIdentity(valid, expectedPath);
 
@@ -110,13 +110,15 @@ public sealed class WindowsSupervisionConnectionTests
             valid with { ServiceProcessId = valid.PipeServerProcessId + 1 },
             valid with { ServiceState = 1 },
             valid with { SessionId = 1 },
-            valid with { UserSid = "S-1-5-21-1-2-3-1001" },
+            valid with { ServiceAccountName = "NT AUTHORITY\\LocalService" },
             valid with
             {
-                ExecutablePath = Path.Combine(
+                ServiceBinaryPath = Path.Combine(
                     Path.GetDirectoryName(expectedPath)!,
                     "Impostor.Service.exe"),
             },
+            valid with { ServiceBinaryPath = $"\"{expectedPath}\" --unexpected" },
+            valid with { ServiceBinaryPath = $"\"{expectedPath}\" \"--unexpected\"" },
         ];
 
         foreach (SupervisionServerIdentity identity in invalidIdentities)
@@ -124,6 +126,17 @@ public sealed class WindowsSupervisionConnectionTests
             Assert.ThrowsExactly<InvalidDataException>(
                 () => WindowsSupervisionServerVerifier.ValidateIdentity(identity, expectedPath));
         }
+    }
+
+    [TestMethod]
+    public void ServerVerificationRequestsOnlyStandardUserServiceQueryRights()
+    {
+        const uint serviceQueryConfig = 0x0001;
+        const uint serviceQueryStatus = 0x0004;
+
+        Assert.AreEqual(
+            serviceQueryConfig | serviceQueryStatus,
+            WindowsSupervisionServerVerifier.RequiredServiceAccess);
     }
 
     [TestMethod]
@@ -415,14 +428,14 @@ public sealed class WindowsSupervisionConnectionTests
             RestartRequiredAfterExit: true,
             RecoverLockOnRestart: false);
 
-    private static SupervisionServerIdentity CreateValidServerIdentity(string executablePath) =>
+    private static SupervisionServerIdentity CreateValidServerIdentity(string serviceBinaryPath) =>
         new(
             PipeServerProcessId: 41,
             ServiceProcessId: 41,
             ServiceState: 4,
             SessionId: 0,
-            UserSid: "S-1-5-18",
-            ExecutablePath: executablePath);
+            ServiceAccountName: "LocalSystem",
+            ServiceBinaryPath: serviceBinaryPath);
 
     private static Task<WindowsSupervisionConnection> ConnectAsync(string pipeName) =>
         WindowsSupervisionConnection.ConnectAsync(
