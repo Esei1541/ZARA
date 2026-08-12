@@ -1,3 +1,6 @@
+using System.Diagnostics;
+using Zara.Infrastructure.Windows;
+
 namespace Zara.Desktop;
 
 /// <summary>
@@ -13,8 +16,28 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
-        var application = new App();
-        application.InitializeComponent();
-        return application.Run();
+        try
+        {
+            using WindowsDesktopActivationChannel? activationChannel = args.Length == 0
+                ? WindowsDesktopActivationChannel
+                    .AcquireOrActivateAsync()
+                    .GetAwaiter()
+                    .GetResult()
+                : WindowsDesktopActivationChannel.AcquirePrimary();
+            if (activationChannel is null)
+            {
+                return 0;
+            }
+
+            var application = new App();
+            application.InitializeComponent();
+            application.AttachActivationChannel(activationChannel);
+            return application.Run();
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("ZARA desktop process startup failed: {0}", exception);
+            return 1;
+        }
     }
 }

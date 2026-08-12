@@ -51,11 +51,18 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private bool _exitRequestInProgress;
     private bool _systemShutdownRequestInProgress;
     private bool _systemEventsSubscribed;
+    private bool _externalActivationRequested;
     private CancellationTokenSource? _systemShutdownWatchdog;
     private int _usagePolicyRefreshInProgress;
     private int _disposeState;
 
     internal bool IsShuttingDown { get; private set; }
+
+    internal void AttachActivationChannel(WindowsDesktopActivationChannel activationChannel)
+    {
+        ArgumentNullException.ThrowIfNull(activationChannel);
+        activationChannel.StartListening(RequestExternalActivationAsync);
+    }
 
     protected override async void OnStartup(StartupEventArgs e)
     {
@@ -111,6 +118,30 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         }
 
         window.Activate();
+    }
+
+    private Task RequestExternalActivationAsync()
+    {
+        if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
+        {
+            return Task.CompletedTask;
+        }
+
+        return Dispatcher.InvokeAsync(() =>
+        {
+            if (IsShuttingDown)
+            {
+                return;
+            }
+
+            if (_mainWindowViewModel is null)
+            {
+                _externalActivationRequested = true;
+                return;
+            }
+
+            ShowMainWindow();
+        }).Task;
     }
 
     private async Task InitializeAsync(IReadOnlyList<string> arguments)
@@ -186,8 +217,9 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             .ReportHealthyAsync(acknowledgedLease.Revision)
             .ConfigureAwait(true);
 
-        if (launchToken is null)
+        if (launchToken is null || _externalActivationRequested)
         {
+            _externalActivationRequested = false;
             ShowMainWindow();
         }
     }
