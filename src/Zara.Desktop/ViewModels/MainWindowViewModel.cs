@@ -21,7 +21,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     private readonly Func<bool, Task> _updateRestartSetting;
     private readonly AsyncCommand _toggleRestartSettingCommand;
-    private readonly AsyncCommand _saveUsagePolicySettingsCommand;
+    private readonly AsyncCommand _saveWeeklyScheduleCommand;
+    private readonly AsyncCommand _saveEmergencyUnlockSettingsCommand;
     private readonly SynchronizationContext? _synchronizationContext;
     private readonly UsagePolicyRuntime? _usagePolicyRuntime;
     private bool _restartOnExitWhenUnlocked;
@@ -72,9 +73,13 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             ToggleRestartSettingAsync,
             ReportSettingsFailure,
             () => CanChangeSettings);
-        _saveUsagePolicySettingsCommand = new AsyncCommand(
-            SaveUsagePolicySettingsAsync,
-            ReportSettingsFailure,
+        _saveWeeklyScheduleCommand = new AsyncCommand(
+            SaveWeeklyScheduleAsync,
+            ReportWeeklyScheduleFailure,
+            () => CanChangeUsagePolicySettings);
+        _saveEmergencyUnlockSettingsCommand = new AsyncCommand(
+            SaveEmergencyUnlockSettingsAsync,
+            ReportEmergencyUnlockSettingsFailure,
             () => CanChangeUsagePolicySettings);
         StartLockDemoCommand = new AsyncCommand(requestLock, ReportLockDemoFailure);
     }
@@ -114,8 +119,11 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     public ICommand ToggleRestartSettingCommand => _toggleRestartSettingCommand;
 
-    /// <summary>Gets the command that persists weekday and emergency-unlock form values.</summary>
-    public ICommand SaveUsagePolicySettingsCommand => _saveUsagePolicySettingsCommand;
+    /// <summary>Gets the command that persists only the weekday usage-ban schedule.</summary>
+    public ICommand SaveWeeklyScheduleCommand => _saveWeeklyScheduleCommand;
+
+    /// <summary>Gets the command that persists only the emergency-unlock settings.</summary>
+    public ICommand SaveEmergencyUnlockSettingsCommand => _saveEmergencyUnlockSettingsCommand;
 
     public ICommand StartLockDemoCommand { get; }
 
@@ -230,7 +238,20 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    internal async Task SaveUsagePolicySettingsAsync()
+    /// <summary>Persists the weekday form without reading or changing the emergency tab.</summary>
+    internal async Task SaveWeeklyScheduleAsync()
+    {
+        await RequireUsagePolicyRuntime()
+            .UpdateWeeklyScheduleAsync(BuildWeeklySchedule())
+            .ConfigureAwait(true);
+        RequestNotification(
+            "사용 금지 시각",
+            "사용 금지 시각을 저장했습니다.",
+            isError: false);
+    }
+
+    /// <summary>Persists the emergency-unlock form without reading or changing the weekday tab.</summary>
+    internal async Task SaveEmergencyUnlockSettingsAsync()
     {
         var emergencyUnlock = new EmergencyUnlockSettings(
             ParseEmergencySetting(
@@ -244,11 +265,54 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                 EmergencyUnlockSettings.MinimumSentenceCount,
                 EmergencyUnlockSettings.MaximumSentenceCount));
         await RequireUsagePolicyRuntime()
-            .UpdateSettingsAsync(BuildWeeklySchedule(), emergencyUnlock)
+            .UpdateEmergencyUnlockSettingsAsync(emergencyUnlock)
             .ConfigureAwait(true);
         RequestNotification(
-            "사용 금지 시각과 긴급 해제 설정을 저장했습니다.",
+            "긴급 해제",
+            "긴급 해제 설정을 저장했습니다.",
             isError: false);
+    }
+
+    /// <summary>Discards weekday edits and restores the latest settings held by the runtime.</summary>
+    internal void ResetWeeklyScheduleEdits()
+    {
+        if (_usagePolicyRuntime is null)
+        {
+            return;
+        }
+
+        WeeklyUsageRestrictionSchedule schedule =
+            _usagePolicyRuntime.CurrentSnapshot.Settings.WeeklySchedule;
+        foreach (DailyUsageRestrictionViewModel editor in WeekdayRestrictions)
+        {
+            editor.Load(schedule.GetRestriction(editor.DayOfWeek));
+        }
+
+        _loadedWeeklySchedule = schedule;
+    }
+
+    /// <summary>Discards emergency-tab edits and restores the latest runtime settings.</summary>
+    internal void ResetEmergencyUnlockEdits()
+    {
+        if (_usagePolicyRuntime is null)
+        {
+            return;
+        }
+
+        EmergencyUnlockSettings emergencyUnlock =
+            _usagePolicyRuntime.CurrentSnapshot.Settings.EmergencyUnlock;
+        EmergencyDurationMinutesText = emergencyUnlock.DurationMinutes
+            .ToString(CultureInfo.InvariantCulture);
+        EmergencySentenceCountText = emergencyUnlock.SentenceCount
+            .ToString(CultureInfo.InvariantCulture);
+        _loadedEmergencyUnlockSettings = emergencyUnlock;
+    }
+
+    /// <summary>Discards all unsaved time-rule form edits before the window is hidden.</summary>
+    internal void ResetUsagePolicyEdits()
+    {
+        ResetWeeklyScheduleEdits();
+        ResetEmergencyUnlockEdits();
     }
 
     private WeeklyUsageRestrictionSchedule BuildWeeklySchedule()
@@ -318,7 +382,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(CanChangeSettings));
         OnPropertyChanged(nameof(CanChangeUsagePolicySettings));
         _toggleRestartSettingCommand.NotifyCanExecuteChanged();
-        _saveUsagePolicySettingsCommand.NotifyCanExecuteChanged();
+        _saveWeeklyScheduleCommand.NotifyCanExecuteChanged();
+        _saveEmergencyUnlockSettingsCommand.NotifyCanExecuteChanged();
     }
 
     private void ReplaceReservationRows(IEnumerable<OutOfHoursReservation> reservations)
@@ -404,15 +469,40 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     private void ReportSettingsFailure(Exception exception)
     {
-        string message = exception switch
+        string message = GetSettingsFailureMessage(
+            exception,
+            "설정을 저장하지 못했습니다. 잠시 후 다시 시도하세요.");
+        RequestNotification("설정 저장", message, isError: true);
+    }
+
+    private void ReportWeeklyScheduleFailure(Exception exception)
+    {
+        string message = GetSettingsFailureMessage(
+            exception,
+            "사용 금지 시각을 저장하지 못했습니다. 잠시 후 다시 시도하세요.");
+        RequestNotification("사용 금지 시각", message, isError: true);
+    }
+
+    private void ReportEmergencyUnlockSettingsFailure(Exception exception)
+    {
+        string message = GetSettingsFailureMessage(
+            exception,
+            "긴급 해제 설정을 저장하지 못했습니다. 잠시 후 다시 시도하세요.");
+        RequestNotification("긴급 해제", message, isError: true);
+    }
+
+    private static string GetSettingsFailureMessage(
+        Exception exception,
+        string unexpectedFailureMessage)
+    {
+        return exception switch
         {
             UsagePolicySettingsSavedButApplyFailedException =>
                 SavedButApplyFailedMessage,
             UsagePolicySettingsLockedException => "사용 금지 시간에는 설정을 변경할 수 없습니다.",
             ArgumentException => exception.Message,
-            _ => "설정을 저장하지 못했습니다. 잠시 후 다시 시도하세요.",
+            _ => unexpectedFailureMessage,
         };
-        RequestNotification("설정 저장", message, isError: true);
     }
 
     private void ReportLockDemoFailure(Exception _) =>

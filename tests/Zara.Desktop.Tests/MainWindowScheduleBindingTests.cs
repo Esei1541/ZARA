@@ -1,5 +1,7 @@
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using Zara.Application.UsagePolicy;
+using Zara.Core.UsagePolicy;
 using Zara.Desktop.ViewModels;
 
 namespace Zara.Desktop.Tests;
@@ -49,6 +51,122 @@ public sealed class MainWindowScheduleBindingTests
         {
             window.Close();
         }
+    }
+
+    [STATestMethod]
+    public async Task LeavingEachSettingsTabRestoresItsLatestSavedValues()
+    {
+        WeeklyUsageRestrictionSchedule schedule =
+            WeeklyUsageRestrictionSchedule.Default.WithRestriction(
+                DayOfWeek.Monday,
+                new DailyUsageRestriction(
+                    isEnabled: true,
+                    startTime: new TimeOnly(9, 0),
+                    releaseTime: new TimeOnly(10, 0)));
+        using var runtime = CreateRuntime(new UsagePolicySettings(
+            schedule,
+            new EmergencyUnlockSettings(durationMinutes: 17, sentenceCount: 4),
+            Array.Empty<OutOfHoursReservation>()));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        DailyUsageRestrictionViewModel monday = viewModel.WeekdayRestrictions.Single(
+            day => day.DayOfWeek == DayOfWeek.Monday);
+        var window = CreateWindow(viewModel);
+
+        try
+        {
+            window.Show();
+            window.MainTabs.SelectedIndex = 1;
+            monday.StartTime.HourText = "7";
+
+            window.MainTabs.SelectedIndex = 2;
+
+            Assert.AreEqual("9", monday.StartTime.HourText);
+            viewModel.EmergencyDurationMinutesText = "99";
+
+            window.MainTabs.SelectedIndex = 1;
+
+            Assert.AreEqual("17", viewModel.EmergencyDurationMinutesText);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [STATestMethod]
+    public async Task ClosingTheWindowDiscardsTheCurrentTabEdit()
+    {
+        using var runtime = CreateRuntime(new UsagePolicySettings(
+            WeeklyUsageRestrictionSchedule.Default,
+            new EmergencyUnlockSettings(durationMinutes: 19, sentenceCount: 3),
+            Array.Empty<OutOfHoursReservation>()));
+        await runtime.InitializeAsync();
+        var viewModel = CreateViewModel(runtime);
+        var window = CreateWindow(viewModel);
+        window.Show();
+        window.MainTabs.SelectedIndex = 2;
+        viewModel.EmergencyDurationMinutesText = "99";
+
+        window.Close();
+
+        Assert.AreEqual("19", viewModel.EmergencyDurationMinutesText);
+    }
+
+    private static MainWindow CreateWindow(MainWindowViewModel viewModel) =>
+        new(viewModel)
+        {
+            Left = -10_000,
+            ShowActivated = false,
+            ShowInTaskbar = false,
+            Top = -10_000,
+        };
+
+    private static MainWindowViewModel CreateViewModel(UsagePolicyRuntime runtime) =>
+        new(
+            runtime,
+            restartOnExitWhenUnlocked: true,
+            updateRestartSetting: _ => Task.CompletedTask,
+            requestLock: () => Task.CompletedTask);
+
+    private static UsagePolicyRuntime CreateRuntime(UsagePolicySettings settings) =>
+        new(
+            new InMemoryStore(settings),
+            new NoOpLockPort(),
+            new EmptyPromptCatalog(),
+            TimeProvider.System);
+
+    private sealed class InMemoryStore(UsagePolicySettings settings) : IUsagePolicySettingsStore
+    {
+        private UsagePolicySettings _settings = settings;
+
+        public Task<UsagePolicySettings> LoadAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(_settings);
+
+        public Task SaveAsync(
+            UsagePolicySettings settings,
+            CancellationToken cancellationToken = default)
+        {
+            _settings = settings;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class NoOpLockPort : IUsagePolicyLockPort
+    {
+        public Task ApplyPolicyLockRequirementAsync(
+            bool lockRequired,
+            CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class EmptyPromptCatalog : IEmergencyUnlockPromptCatalog
+    {
+        public Task<IReadOnlyList<string>> SelectDistinctAsync(
+            int count,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
     }
 
     private static T FindVisualChild<T>(System.Windows.DependencyObject parent)

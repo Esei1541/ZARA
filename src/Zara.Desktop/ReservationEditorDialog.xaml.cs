@@ -21,18 +21,21 @@ public partial class ReservationEditorDialog : Window
 
     private void Save_Click(object sender, RoutedEventArgs e)
     {
-        Draft = _viewModel.CreateDraft();
-        if (Draft is null)
+        if (!_viewModel.TryCreateDraft(
+                out ReservationDraft? draft,
+                out string validationMessage) ||
+            draft is null)
         {
             System.Windows.MessageBox.Show(
                 this,
-                "날짜를 선택해주세요.",
+                validationMessage,
                 "시간 외 사용 예약",
                 MessageBoxButton.OK,
                 MessageBoxImage.Information);
             return;
         }
 
+        Draft = draft;
         DialogResult = true;
     }
 }

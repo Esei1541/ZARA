@@ -111,9 +111,8 @@ internal sealed partial class EmergencyUnlockWindow : Window
                 return;
             }
 
-            ValidationMessage.Text = _inputMatcher.Compare(enteredText).IsExactMatch
-                ? "문장은 모두 일치하지만 긴급 해제를 시작하지 못했습니다. 다시 시도하세요."
-                : "빨간색으로 표시된 부분을 확인하세요.";
+            EmergencyUnlockInputComparison comparison = _inputMatcher.Compare(enteredText);
+            ValidationMessage.Text = GetValidationMessage(comparison);
             InputTextBox.Focus();
         }
         catch (Exception exception)
@@ -127,5 +126,23 @@ internal sealed partial class EmergencyUnlockWindow : Window
                 CompleteButton.IsEnabled = true;
             }
         }
+    }
+
+    private static string GetValidationMessage(EmergencyUnlockInputComparison comparison)
+    {
+        if (comparison.IsExactMatch)
+        {
+            return "문장은 모두 일치하지만 긴급 해제를 시작하지 못했습니다. 다시 시도하세요.";
+        }
+
+        if (comparison.HasExcessInput)
+        {
+            return "예시문 뒤에 추가로 입력한 내용을 지우세요.";
+        }
+
+        return comparison.Segments.Any(
+            segment => segment.State == EmergencyUnlockInputState.Mismatched)
+            ? "빨간색으로 표시된 부분을 확인하세요."
+            : "예시문을 끝까지 입력하세요.";
     }
 }

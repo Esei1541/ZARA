@@ -319,6 +319,102 @@ public sealed class UsagePolicyRuntimeTests
     }
 
     [TestMethod]
+    public async Task WeeklyScheduleUpdatePreservesEmergencySettingsAndReservations()
+    {
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(),
+            new DateOnly(2026, 9, 10),
+            new TimeOnly(13, 0),
+            new TimeOnly(14, 0),
+            "보존 대상");
+        var emergency = new EmergencyUnlockSettings(durationMinutes: 23, sentenceCount: 5);
+        var store = new RecordingStore(new UsagePolicySettings(
+            WeeklyUsageRestrictionSchedule.Default,
+            emergency,
+            [reservation]));
+        using var runtime = CreateRuntime(
+            store,
+            new RecordingLockPort(),
+            new RecordingPromptCatalog(),
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        WeeklyUsageRestrictionSchedule updatedSchedule = CreateSchedule(
+            DayOfWeek.Tuesday,
+            new TimeOnly(21, 0),
+            new TimeOnly(7, 0));
+
+        await runtime.UpdateWeeklyScheduleAsync(updatedSchedule);
+
+        Assert.AreEqual(updatedSchedule, store.Settings.WeeklySchedule);
+        Assert.AreEqual(emergency, store.Settings.EmergencyUnlock);
+        CollectionAssert.AreEqual(
+            new[] { reservation },
+            store.Settings.Reservations.ToArray());
+    }
+
+    [TestMethod]
+    public async Task EmergencySettingsUpdatePreservesWeeklyScheduleAndReservations()
+    {
+        WeeklyUsageRestrictionSchedule schedule = CreateSchedule(
+            DayOfWeek.Tuesday,
+            new TimeOnly(21, 0),
+            new TimeOnly(7, 0));
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(),
+            new DateOnly(2026, 9, 10),
+            new TimeOnly(13, 0),
+            new TimeOnly(14, 0),
+            "보존 대상");
+        var store = new RecordingStore(new UsagePolicySettings(
+            schedule,
+            EmergencyUnlockSettings.Default,
+            [reservation]));
+        using var runtime = CreateRuntime(
+            store,
+            new RecordingLockPort(),
+            new RecordingPromptCatalog(),
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        var updatedEmergency = new EmergencyUnlockSettings(durationMinutes: 31, sentenceCount: 7);
+
+        await runtime.UpdateEmergencyUnlockSettingsAsync(updatedEmergency);
+
+        Assert.AreEqual(schedule, store.Settings.WeeklySchedule);
+        Assert.AreEqual(updatedEmergency, store.Settings.EmergencyUnlock);
+        CollectionAssert.AreEqual(
+            new[] { reservation },
+            store.Settings.Reservations.ToArray());
+    }
+
+    [TestMethod]
+    public async Task ConcurrentTabSavesPreserveBothLatestChanges()
+    {
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        using var runtime = CreateRuntime(
+            store,
+            new RecordingLockPort(),
+            new RecordingPromptCatalog(),
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        WeeklyUsageRestrictionSchedule updatedSchedule = CreateSchedule(
+            DayOfWeek.Tuesday,
+            new TimeOnly(21, 0),
+            new TimeOnly(7, 0));
+        var updatedEmergency = new EmergencyUnlockSettings(durationMinutes: 29, sentenceCount: 9);
+
+        await Task.WhenAll(
+            runtime.UpdateWeeklyScheduleAsync(updatedSchedule),
+            runtime.UpdateEmergencyUnlockSettingsAsync(updatedEmergency));
+
+        Assert.AreEqual(updatedSchedule, store.Settings.WeeklySchedule);
+        Assert.AreEqual(updatedEmergency, store.Settings.EmergencyUnlock);
+        Assert.AreEqual(2, store.SaveCount);
+    }
+
+    [TestMethod]
     public async Task FailedSettingsSaveLeavesCurrentSnapshotUnchanged()
     {
         var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero));
@@ -408,6 +504,8 @@ public sealed class UsagePolicyRuntimeTests
         public Exception? SaveException { get; init; }
 
         public int SaveCount { get; private set; }
+
+        public UsagePolicySettings Settings => _settings;
 
         public Task<UsagePolicySettings> LoadAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(_settings);

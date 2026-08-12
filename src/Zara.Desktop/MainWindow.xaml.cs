@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Controls;
 using Zara.Application.UsagePolicy;
 using Zara.Core.UsagePolicy;
 using Zara.Desktop.ViewModels;
@@ -20,6 +21,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        _viewModel.ResetUsagePolicyEdits();
         if (System.Windows.Application.Current is App { IsShuttingDown: false })
         {
             e.Cancel = true;
@@ -34,6 +36,26 @@ public partial class MainWindow : Window
         _viewModel.NotificationRequested -= OnNotificationRequested;
         _viewModel.Dispose();
         base.OnClosed(e);
+    }
+
+    private void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!ReferenceEquals(e.OriginalSource, MainTabs))
+        {
+            return;
+        }
+
+        foreach (object removedItem in e.RemovedItems)
+        {
+            if (ReferenceEquals(removedItem, WeeklyScheduleTab))
+            {
+                _viewModel.ResetWeeklyScheduleEdits();
+            }
+            else if (ReferenceEquals(removedItem, EmergencyUnlockSettingsTab))
+            {
+                _viewModel.ResetEmergencyUnlockEdits();
+            }
+        }
     }
 
     private void OnNotificationRequested(

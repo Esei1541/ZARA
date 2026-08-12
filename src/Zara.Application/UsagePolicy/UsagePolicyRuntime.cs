@@ -127,6 +127,54 @@ public sealed class UsagePolicyRuntime : IDisposable
     }
 
     /// <summary>
+    /// Replaces only the weekday schedule while preserving the latest emergency-unlock settings
+    /// and reservations serialized by this runtime.
+    /// </summary>
+    public Task UpdateWeeklyScheduleAsync(
+        WeeklyUsageRestrictionSchedule weeklySchedule,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(weeklySchedule);
+
+        return ExecuteAsync(
+            async () =>
+            {
+                ThrowIfSettingsChangeBlocked();
+                UsagePolicySettings current = CurrentSnapshot.Settings;
+                var updated = new UsagePolicySettings(
+                    weeklySchedule,
+                    current.EmergencyUnlock,
+                    current.Reservations);
+                await PersistAndApplyAsync(updated, cancellationToken).ConfigureAwait(false);
+            },
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Replaces only the emergency-unlock settings while preserving the latest weekday schedule
+    /// and reservations serialized by this runtime.
+    /// </summary>
+    public Task UpdateEmergencyUnlockSettingsAsync(
+        EmergencyUnlockSettings emergencyUnlock,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(emergencyUnlock);
+
+        return ExecuteAsync(
+            async () =>
+            {
+                ThrowIfSettingsChangeBlocked();
+                UsagePolicySettings current = CurrentSnapshot.Settings;
+                var updated = new UsagePolicySettings(
+                    current.WeeklySchedule,
+                    emergencyUnlock,
+                    current.Reservations);
+                await PersistAndApplyAsync(updated, cancellationToken).ConfigureAwait(false);
+            },
+            cancellationToken);
+    }
+
+    /// <summary>
     /// Adds a reservation when settings are currently mutable.
     /// </summary>
     public Task<ReservationChangeStatus> AddReservationAsync(

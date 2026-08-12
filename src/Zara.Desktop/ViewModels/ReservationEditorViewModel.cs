@@ -61,16 +61,39 @@ internal sealed class ReservationEditorViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Creates a raw dialog result when a date is selected. Same-day interval validation remains
+    /// Validates the dialog fields and creates a raw result. Same-day interval validation remains
     /// the responsibility of the Core reservation constructor.
     /// </summary>
-    public ReservationDraft? CreateDraft() => SelectedDate is DateTime selectedDate
-        ? new ReservationDraft(
-            DateOnly.FromDateTime(selectedDate),
-            StartTime.ToTimeOnly(),
-            EndTime.ToTimeOnly(),
-            Memo)
-        : null;
+    /// <param name="draft">The completed raw result when every dialog field is valid.</param>
+    /// <param name="validationMessage">A Korean message identifying the first invalid field.</param>
+    /// <returns><see langword="true"/> when the dialog fields can be converted to a result.</returns>
+    public bool TryCreateDraft(
+        out ReservationDraft? draft,
+        out string validationMessage)
+    {
+        draft = null;
+        if (SelectedDate is not DateTime selectedDate)
+        {
+            validationMessage = "날짜를 선택해주세요.";
+            return false;
+        }
+
+        try
+        {
+            draft = new ReservationDraft(
+                DateOnly.FromDateTime(selectedDate),
+                StartTime.ToTimeOnly("시작 시각"),
+                EndTime.ToTimeOnly("종료 시각"),
+                Memo);
+            validationMessage = string.Empty;
+            return true;
+        }
+        catch (ArgumentException exception)
+        {
+            validationMessage = exception.Message;
+            return false;
+        }
+    }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

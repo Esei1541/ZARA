@@ -22,8 +22,8 @@ public enum EmergencyUnlockInputState
 /// Groups adjacent Unicode text elements that share one emergency-unlock input state.
 /// </summary>
 /// <param name="Text">
-/// The entered text for matched or mismatched positions, or the expected text for positions that
-/// have not been entered.
+/// The expected challenge text. Entered mismatches affect only the state so the displayed example
+/// never changes while the user types.
 /// </param>
 /// <param name="State">How <paramref name="Text" /> relates to the expected challenge.</param>
 public sealed record EmergencyUnlockInputSegment(
@@ -31,15 +31,19 @@ public sealed record EmergencyUnlockInputSegment(
     EmergencyUnlockInputState State);
 
 /// <summary>
-/// Contains the display-ready progress for one emergency-unlock input and its exact-match result.
+/// Contains the display-ready progress for one emergency-unlock input and its completion result.
 /// </summary>
 /// <param name="Segments">Adjacent text segments grouped by their match state.</param>
 /// <param name="IsExactMatch">
 /// Whether the entered text exactly matches the challenge after normalizing line endings.
 /// </param>
+/// <param name="HasExcessInput">
+/// Whether the entered text contains Unicode text elements beyond the displayed challenge.
+/// </param>
 public sealed record EmergencyUnlockInputComparison(
     IReadOnlyList<EmergencyUnlockInputSegment> Segments,
-    bool IsExactMatch);
+    bool IsExactMatch,
+    bool HasExcessInput);
 
 /// <summary>
 /// Compares emergency-unlock input with one challenge without depending on WPF or other I/O.
@@ -66,7 +70,7 @@ public sealed class EmergencyUnlockInputMatcher
     }
 
     /// <summary>
-    /// Builds display segments for the current input while preserving entered mismatched text.
+    /// Builds display segments for the current input while preserving the expected challenge text.
     /// </summary>
     /// <param name="enteredText">The current text from the emergency-unlock input control.</param>
     /// <returns>
@@ -78,12 +82,11 @@ public sealed class EmergencyUnlockInputMatcher
 
         string normalizedEnteredText = NormalizeLineEndings(enteredText);
         string[] enteredTextElements = GetTextElements(normalizedEnteredText);
-        int comparisonLength = Math.Max(_expectedTextElements.Length, enteredTextElements.Length);
         var segments = new List<EmergencyUnlockInputSegment>();
         var segmentText = new StringBuilder();
         EmergencyUnlockInputState? segmentState = null;
 
-        for (int index = 0; index < comparisonLength; index++)
+        for (int index = 0; index < _expectedTextElements.Length; index++)
         {
             (string text, EmergencyUnlockInputState state) = GetPosition(
                 index,
@@ -105,7 +108,8 @@ public sealed class EmergencyUnlockInputMatcher
 
         return new EmergencyUnlockInputComparison(
             segments.ToArray(),
-            string.Equals(normalizedEnteredText, _expectedText, StringComparison.Ordinal));
+            string.Equals(normalizedEnteredText, _expectedText, StringComparison.Ordinal),
+            enteredTextElements.Length > _expectedTextElements.Length);
     }
 
     /// <summary>
@@ -136,11 +140,13 @@ public sealed class EmergencyUnlockInputMatcher
             return (_expectedTextElements[index], EmergencyUnlockInputState.Pending);
         }
 
-        string enteredText = enteredTextElements[index];
-        bool matched = index < _expectedTextElements.Length &&
-            string.Equals(enteredText, _expectedTextElements[index], StringComparison.Ordinal);
+        string expectedText = _expectedTextElements[index];
+        bool matched = string.Equals(
+            enteredTextElements[index],
+            expectedText,
+            StringComparison.Ordinal);
         return (
-            enteredText,
+            expectedText,
             matched ? EmergencyUnlockInputState.Matched : EmergencyUnlockInputState.Mismatched);
     }
 

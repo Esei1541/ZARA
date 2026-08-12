@@ -59,7 +59,7 @@ public sealed class MainWindowViewModelTests
         viewModel.NotificationRequested += (_, notification) =>
             notificationSource.TrySetResult(notification);
 
-        viewModel.SaveUsagePolicySettingsCommand.Execute(parameter: null);
+        viewModel.SaveWeeklyScheduleCommand.Execute(parameter: null);
         MainWindowNotificationEventArgs saveResult = await notificationSource.Task.WaitAsync(
             TimeSpan.FromSeconds(5));
 
@@ -134,7 +134,7 @@ public sealed class MainWindowViewModelTests
             weekday.IsRestrictionEnabled = false;
         }
 
-        await viewModel.SaveUsagePolicySettingsAsync();
+        await viewModel.SaveWeeklyScheduleAsync();
 
         Assert.IsTrue(AllWeekdaysAreDisabled(store.Settings.WeeklySchedule));
         Assert.AreEqual(
@@ -184,15 +184,15 @@ public sealed class MainWindowViewModelTests
         viewModel.NotificationRequested += (_, notification) =>
             notifications.Add(notification);
 
-        await viewModel.SaveUsagePolicySettingsAsync();
-        await viewModel.SaveUsagePolicySettingsAsync();
+        await viewModel.SaveWeeklyScheduleAsync();
+        await viewModel.SaveWeeklyScheduleAsync();
 
         Assert.AreEqual(2, store.SaveCount);
         Assert.HasCount(2, notifications);
         Assert.IsTrue(notifications.All(notification => !notification.IsError));
-        Assert.IsTrue(notifications.All(notification => notification.Title == "설정 저장"));
+        Assert.IsTrue(notifications.All(notification => notification.Title == "사용 금지 시각"));
         Assert.IsTrue(notifications.All(notification =>
-            notification.Message == "사용 금지 시각과 긴급 해제 설정을 저장했습니다."));
+            notification.Message == "사용 금지 시각을 저장했습니다."));
     }
 
     [STATestMethod]
@@ -218,12 +218,12 @@ public sealed class MainWindowViewModelTests
         viewModel.NotificationRequested += (_, notification) =>
             notificationSource.TrySetResult(notification);
 
-        viewModel.SaveUsagePolicySettingsCommand.Execute(parameter: null);
+        viewModel.SaveWeeklyScheduleCommand.Execute(parameter: null);
         MainWindowNotificationEventArgs result = await notificationSource.Task.WaitAsync(
             TimeSpan.FromSeconds(5));
 
         Assert.IsTrue(result.IsError);
-        Assert.AreEqual("설정 저장", result.Title);
+        Assert.AreEqual("사용 금지 시각", result.Title);
         Assert.AreEqual(
             "설정은 저장했습니다. 현재 잠금 상태를 적용하지 못해 자동으로 다시 시도합니다.",
             result.Message);
@@ -277,7 +277,7 @@ public sealed class MainWindowViewModelTests
         viewModel.NotificationRequested += (_, notification) =>
             notificationSource.TrySetResult(notification);
 
-        viewModel.SaveUsagePolicySettingsCommand.Execute(parameter: null);
+        viewModel.SaveWeeklyScheduleCommand.Execute(parameter: null);
         MainWindowNotificationEventArgs result = await notificationSource.Task.WaitAsync(
             TimeSpan.FromSeconds(5));
 
@@ -285,6 +285,98 @@ public sealed class MainWindowViewModelTests
         Assert.AreEqual(
             "월요일의 시작 시각과 해제 시각은 다르게 입력하세요.",
             result.Message);
+    }
+
+    [STATestMethod]
+    public async Task SavingWeeklyScheduleDoesNotReadOrOverwriteEmergencyEdits()
+    {
+        var originalEmergency = new EmergencyUnlockSettings(durationMinutes: 17, sentenceCount: 4);
+        var store = new RecordingStore(new UsagePolicySettings(
+            WeeklyUsageRestrictionSchedule.Default,
+            originalEmergency,
+            Array.Empty<OutOfHoursReservation>()));
+        using var runtime = CreateRuntime(
+            store,
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        DailyUsageRestrictionViewModel monday = viewModel.WeekdayRestrictions.Single(
+            day => day.DayOfWeek == DayOfWeek.Monday);
+        monday.IsRestrictionEnabled = true;
+        monday.StartTime.Set(new TimeOnly(9, 0));
+        monday.ReleaseTime.Set(new TimeOnly(10, 0));
+        viewModel.EmergencyDurationMinutesText = "문자";
+
+        await viewModel.SaveWeeklyScheduleAsync();
+
+        Assert.IsTrue(store.Settings.WeeklySchedule.Monday.IsEnabled);
+        Assert.AreEqual(originalEmergency, store.Settings.EmergencyUnlock);
+    }
+
+    [STATestMethod]
+    public async Task SavingEmergencySettingsDoesNotReadOrOverwriteScheduleEdits()
+    {
+        WeeklyUsageRestrictionSchedule originalSchedule =
+            WeeklyUsageRestrictionSchedule.Default.WithRestriction(
+                DayOfWeek.Tuesday,
+                new DailyUsageRestriction(
+                    isEnabled: true,
+                    startTime: new TimeOnly(9, 0),
+                    releaseTime: new TimeOnly(10, 0)));
+        var store = new RecordingStore(new UsagePolicySettings(
+            originalSchedule,
+            EmergencyUnlockSettings.Default,
+            Array.Empty<OutOfHoursReservation>()));
+        using var runtime = CreateRuntime(
+            store,
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        DailyUsageRestrictionViewModel monday = viewModel.WeekdayRestrictions.Single(
+            day => day.DayOfWeek == DayOfWeek.Monday);
+        monday.IsRestrictionEnabled = true;
+        viewModel.EmergencyDurationMinutesText = "25";
+        viewModel.EmergencySentenceCountText = "8";
+
+        await viewModel.SaveEmergencyUnlockSettingsAsync();
+
+        Assert.AreEqual(originalSchedule, store.Settings.WeeklySchedule);
+        Assert.AreEqual(new EmergencyUnlockSettings(25, 8), store.Settings.EmergencyUnlock);
+    }
+
+    [STATestMethod]
+    public async Task ResetRestoresTheLatestSavedValuesInsteadOfProductDefaults()
+    {
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        using var runtime = CreateRuntime(
+            store,
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        DailyUsageRestrictionViewModel monday = viewModel.WeekdayRestrictions.Single(
+            day => day.DayOfWeek == DayOfWeek.Monday);
+        monday.IsRestrictionEnabled = true;
+        monday.StartTime.Set(new TimeOnly(9, 0));
+        monday.ReleaseTime.Set(new TimeOnly(10, 0));
+        await viewModel.SaveWeeklyScheduleAsync();
+        viewModel.EmergencyDurationMinutesText = "27";
+        viewModel.EmergencySentenceCountText = "6";
+        await viewModel.SaveEmergencyUnlockSettingsAsync();
+
+        monday.IsRestrictionEnabled = false;
+        monday.StartTime.HourText = "1";
+        viewModel.EmergencyDurationMinutesText = "99";
+        viewModel.EmergencySentenceCountText = "99";
+
+        viewModel.ResetUsagePolicyEdits();
+
+        Assert.IsTrue(monday.IsRestrictionEnabled);
+        Assert.AreEqual("9", monday.StartTime.HourText);
+        Assert.AreEqual("27", viewModel.EmergencyDurationMinutesText);
+        Assert.AreEqual("6", viewModel.EmergencySentenceCountText);
     }
 
     private static MainWindowViewModel CreateViewModel(UsagePolicyRuntime runtime) =>
