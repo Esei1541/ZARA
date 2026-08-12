@@ -19,15 +19,14 @@ internal static class WindowsServiceHost
     private static readonly TimeSpan ActiveSessionPollInterval = TimeSpan.FromSeconds(1);
 
     private static readonly object StatusGate = new();
+    private static readonly object GenerationGate = new();
     private static readonly ServiceMainCallback ServiceMainCallbackRoot = ServiceMain;
     private static readonly ServiceControlHandlerCallback ServiceControlHandlerCallbackRoot =
         HandleServiceControl;
 
     private static nint _statusHandle;
     private static CancellationTokenSource? _serviceStopping;
-    private static LatestSupervisionCommandSource? _commandSource;
-    private static DesktopLaunchHandshakeRegistry? _handshakeRegistry;
-    private static int _targetSessionId = -1;
+    private static ActiveConsoleGeneration? _activeGeneration;
     private static uint _checkPoint;
 
     /// <summary>
@@ -99,34 +98,7 @@ internal static class WindowsServiceHost
             uint serviceSpecificExitCode = 0;
             try
             {
-                ActiveConsoleSessionTarget target = WaitForActiveConsoleSessionAsync(
-                        TryGetActiveConsoleSessionTarget,
-                        (delay, cancellationToken) => Task.Delay(delay, cancellationToken),
-                        _serviceStopping.Token)
-                    .GetAwaiter()
-                    .GetResult();
-                _targetSessionId = target.SessionId;
-                _commandSource = new LatestSupervisionCommandSource(
-                    CreateInitialSupervisionDirective());
-                _handshakeRegistry = new DesktopLaunchHandshakeRegistry();
-                var launcher = new WindowsDesktopProcessLauncher(
-                    _targetSessionId,
-                    _handshakeRegistry);
-                var supervisor = new DesktopSupervisor(
-                    launcher,
-                    _commandSource,
-                    new SystemSupervisionDelay());
-                var pipeServer = new WindowsSupervisionPipeServer(
-                    _commandSource,
-                    _handshakeRegistry,
-                    _targetSessionId,
-                    target.UserSid,
-                    requireInitialServiceLaunch: true);
-
-                RunComponentsAsync(
-                        supervisor,
-                        pipeServer,
-                        _serviceStopping.Token)
+                RunSessionGenerationsAsync(_serviceStopping.Token)
                     .GetAwaiter()
                     .GetResult();
             }
@@ -164,23 +136,146 @@ internal static class WindowsServiceHost
         {
             _serviceStopping?.Dispose();
             _serviceStopping = null;
-            _commandSource = null;
-            _handshakeRegistry = null;
-            _targetSessionId = -1;
+            lock (GenerationGate)
+            {
+                _activeGeneration = null;
+            }
+
             _statusHandle = nint.Zero;
         }
     }
 
-    private static async Task RunComponentsAsync(
-        DesktopSupervisor supervisor,
-        WindowsSupervisionPipeServer pipeServer,
+    private static Task RunSessionGenerationsAsync(CancellationToken cancellationToken) =>
+        RunSessionGenerationsAsync(
+            TryGetActiveConsoleSessionTarget,
+            (delay, token) => Task.Delay(delay, token),
+            RunActiveConsoleGenerationAsync,
+            cancellationToken);
+
+    internal static async Task RunSessionGenerationsAsync(
+        Func<ActiveConsoleSessionTarget?> readTarget,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        Func<
+            ActiveConsoleSessionTarget,
+            CancellationToken,
+            Task<SessionGenerationRunResult>> runGeneration,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(readTarget);
+        ArgumentNullException.ThrowIfNull(delay);
+        ArgumentNullException.ThrowIfNull(runGeneration);
+
+        ActiveConsoleSessionTarget? previouslyEndedTarget = null;
+        bool previouslyEndedTargetWasUnavailable = false;
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ActiveConsoleSessionTarget target = await WaitForNextActiveConsoleSessionAsync(
+                    readTarget,
+                    delay,
+                    previouslyEndedTarget,
+                    previouslyEndedTargetWasUnavailable,
+                    cancellationToken)
+                .ConfigureAwait(false);
+            SessionGenerationRunResult result = await runGeneration(target, cancellationToken)
+                .ConfigureAwait(false);
+            if (!result.SessionEnded)
+            {
+                return;
+            }
+
+            previouslyEndedTarget = target;
+            previouslyEndedTargetWasUnavailable = result.TargetWasObservedUnavailable;
+        }
+    }
+
+    private static async Task<SessionGenerationRunResult> RunActiveConsoleGenerationAsync(
+        ActiveConsoleSessionTarget target,
         CancellationToken serviceCancellationToken)
     {
+        var commandSource = new LatestSupervisionCommandSource(
+            CreateInitialSupervisionDirective());
+        var generation = new ActiveConsoleGeneration(target, commandSource);
+        var handshakeRegistry = new DesktopLaunchHandshakeRegistry();
+        var launcher = new WindowsDesktopProcessLauncher(
+            target.SessionId,
+            handshakeRegistry);
+        var supervisor = new DesktopSupervisor(
+            launcher,
+            commandSource,
+            new SystemSupervisionDelay());
+        var pipeServer = new WindowsSupervisionPipeServer(
+            commandSource,
+            handshakeRegistry,
+            target.SessionId,
+            target.UserSid,
+            requireInitialServiceLaunch: true);
+
+        SetActiveGeneration(generation);
+        bool targetWasObservedUnavailable = false;
+        try
+        {
+            // A logoff can race between selecting the console token and publishing the generation
+            // to the SCM callback. Rechecking here closes that gap without starting a stale child.
+            ActiveConsoleSessionTarget? currentTarget = TryGetActiveConsoleSessionTarget();
+            if (currentTarget is null || !IsSameTarget(currentTarget.Value, target))
+            {
+                targetWasObservedUnavailable = currentTarget is null;
+                _ = generation.TryEndSession(target.SessionId);
+            }
+
+            bool sessionEnded = await RunGenerationComponentsAsync(
+                    supervisor.RunAsync,
+                    pipeServer.RunAsync,
+                    generation.SessionEnded,
+                    serviceCancellationToken)
+                .ConfigureAwait(false);
+            return new(sessionEnded, targetWasObservedUnavailable);
+        }
+        finally
+        {
+            ClearActiveGeneration(generation);
+        }
+    }
+
+    internal static async Task<bool> RunGenerationComponentsAsync(
+        Func<CancellationToken, Task> runSupervision,
+        Func<CancellationToken, Task> runTransport,
+        Task sessionEnded,
+        CancellationToken serviceCancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(runSupervision);
+        ArgumentNullException.ThrowIfNull(runTransport);
+        ArgumentNullException.ThrowIfNull(sessionEnded);
+
         using var componentCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             serviceCancellationToken);
-        Task transport = pipeServer.RunAsync(componentCancellation.Token);
-        Task supervision = supervisor.RunAsync(componentCancellation.Token);
-        Task completed = await Task.WhenAny(supervision, transport).ConfigureAwait(false);
+        Task supervision = InvokeComponent(runSupervision, componentCancellation.Token);
+        Task transport = InvokeComponent(runTransport, componentCancellation.Token);
+        Task completed = await Task.WhenAny(supervision, transport, sessionEnded)
+            .ConfigureAwait(false);
+
+        if (sessionEnded.IsCompletedSuccessfully)
+        {
+            componentCancellation.Cancel();
+
+#pragma warning disable CA1031 // Session replacement expects component cancellation after cleanup.
+            try
+            {
+                await Task.WhenAll(supervision, transport).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+                when (!supervision.IsFaulted &&
+                      !transport.IsFaulted &&
+                      !serviceCancellationToken.IsCancellationRequested)
+            {
+            }
+#pragma warning restore CA1031
+
+            serviceCancellationToken.ThrowIfCancellationRequested();
+            return true;
+        }
 
         if (!serviceCancellationToken.IsCancellationRequested)
         {
@@ -198,6 +293,48 @@ internal static class WindowsServiceHost
 #pragma warning restore CA1031
 
         await completed.ConfigureAwait(false);
+        return false;
+    }
+
+    private static Task InvokeComponent(
+        Func<CancellationToken, Task> runComponent,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return runComponent(cancellationToken) ??
+                Task.FromException(
+                    new InvalidOperationException("A Service component returned a null task."));
+        }
+        catch (Exception exception)
+        {
+            return Task.FromException(exception);
+        }
+    }
+
+    private static void SetActiveGeneration(ActiveConsoleGeneration generation)
+    {
+        lock (GenerationGate)
+        {
+            if (_activeGeneration is not null)
+            {
+                throw new InvalidOperationException(
+                    "A previous console generation is still active.");
+            }
+
+            _activeGeneration = generation;
+        }
+    }
+
+    private static void ClearActiveGeneration(ActiveConsoleGeneration generation)
+    {
+        lock (GenerationGate)
+        {
+            if (ReferenceEquals(_activeGeneration, generation))
+            {
+                _activeGeneration = null;
+            }
+        }
     }
 
     private static uint HandleServiceControl(
@@ -224,9 +361,8 @@ internal static class WindowsServiceHost
                     break;
 
                 case NativeMethods.ServiceControlSessionChange
-                    when eventType == NativeMethods.WtsSessionLogoff &&
-                         IsTargetSession(eventData):
-                    _commandSource?.EndSession();
+                    when eventType == NativeMethods.WtsSessionLogoff:
+                    EndActiveGeneration(eventData);
                     break;
             }
         }
@@ -238,21 +374,32 @@ internal static class WindowsServiceHost
         return 0;
     }
 
-    private static bool IsTargetSession(nint eventData)
+    private static void EndActiveGeneration(nint eventData)
     {
-        if (eventData == nint.Zero || _targetSessionId < 0)
+        if (eventData == nint.Zero)
         {
-            return false;
+            return;
         }
 
         NativeMethods.WtsSessionNotification notification =
             Marshal.PtrToStructure<NativeMethods.WtsSessionNotification>(eventData);
-        return notification.SessionId == (uint)_targetSessionId;
+        if (notification.SessionId > int.MaxValue)
+        {
+            return;
+        }
+
+        ActiveConsoleGeneration? generation;
+        lock (GenerationGate)
+        {
+            generation = _activeGeneration;
+        }
+
+        _ = generation?.TryEndSession((int)notification.SessionId);
     }
 
     /// <summary>
-    /// Builds the first supervision instruction after a boot-time Service finds an interactive
-    /// console user. The Service starts the Desktop only; the Desktop later evaluates all product
+    /// Builds the first supervision instruction after the Service selects an interactive console
+    /// generation. The Service starts the Desktop only; the Desktop later evaluates all product
     /// settings and publishes the resulting restart lease.
     /// </summary>
     internal static SupervisionDirective CreateInitialSupervisionDirective() => new(
@@ -267,16 +414,41 @@ internal static class WindowsServiceHost
     internal static async Task<ActiveConsoleSessionTarget> WaitForActiveConsoleSessionAsync(
         Func<ActiveConsoleSessionTarget?> readTarget,
         Func<TimeSpan, CancellationToken, Task> delay,
+        CancellationToken cancellationToken) =>
+        await WaitForNextActiveConsoleSessionAsync(
+                readTarget,
+                delay,
+                previouslyEndedTarget: null,
+                previouslyEndedTargetWasUnavailable: false,
+                cancellationToken)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Waits for the next console logon without reselecting a target that is still disappearing
+    /// after logoff. The same target may be accepted again only after it was observed unavailable.
+    /// </summary>
+    internal static async Task<ActiveConsoleSessionTarget> WaitForNextActiveConsoleSessionAsync(
+        Func<ActiveConsoleSessionTarget?> readTarget,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        ActiveConsoleSessionTarget? previouslyEndedTarget,
+        bool previouslyEndedTargetWasUnavailable,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(readTarget);
         ArgumentNullException.ThrowIfNull(delay);
 
+        bool previousTargetWasUnavailable = previouslyEndedTargetWasUnavailable;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             ActiveConsoleSessionTarget? target = readTarget();
-            if (target is not null)
+            if (target is null)
+            {
+                previousTargetWasUnavailable = true;
+            }
+            else if (previouslyEndedTarget is null ||
+                     previousTargetWasUnavailable ||
+                     !IsSameTarget(target.Value, previouslyEndedTarget.Value))
             {
                 return target.Value;
             }
@@ -284,6 +456,11 @@ internal static class WindowsServiceHost
             await delay(ActiveSessionPollInterval, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    private static bool IsSameTarget(
+        ActiveConsoleSessionTarget left,
+        ActiveConsoleSessionTarget right) =>
+        left.SessionId == right.SessionId && left.UserSid.Equals(right.UserSid);
 
     private static ActiveConsoleSessionTarget? TryGetActiveConsoleSessionTarget()
     {
@@ -353,3 +530,49 @@ internal static class WindowsServiceHost
 internal readonly record struct ActiveConsoleSessionTarget(
     int SessionId,
     SecurityIdentifier UserSid);
+
+/// <summary>
+/// Owns the end signal and command state for one exact interactive logon generation.
+/// </summary>
+internal sealed class ActiveConsoleGeneration
+{
+    private readonly TaskCompletionSource _sessionEnded = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public ActiveConsoleGeneration(
+        ActiveConsoleSessionTarget target,
+        LatestSupervisionCommandSource commandSource)
+    {
+        ArgumentNullException.ThrowIfNull(commandSource);
+
+        Target = target;
+        CommandSource = commandSource;
+    }
+
+    public ActiveConsoleSessionTarget Target { get; }
+
+    public LatestSupervisionCommandSource CommandSource { get; }
+
+    public Task SessionEnded => _sessionEnded.Task;
+
+    /// <summary>
+    /// Ends this generation only when the SCM notification belongs to its exact session.
+    /// The no-restart command is published before the host starts cancelling components.
+    /// </summary>
+    public bool TryEndSession(int sessionId)
+    {
+        if (sessionId != Target.SessionId)
+        {
+            return false;
+        }
+
+        CommandSource.EndSession();
+        _sessionEnded.TrySetResult();
+        return true;
+    }
+}
+
+/// <summary>Describes why one active-console generation stopped running.</summary>
+internal readonly record struct SessionGenerationRunResult(
+    bool SessionEnded,
+    bool TargetWasObservedUnavailable);
