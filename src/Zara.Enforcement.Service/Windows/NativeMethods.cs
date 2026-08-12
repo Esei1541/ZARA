@@ -27,6 +27,7 @@ internal static partial class NativeMethods
     internal const uint ServiceControlStop = 0x00000001;
     internal const uint ServiceControlShutdown = 0x00000005;
     internal const uint ServiceControlSessionChange = 0x0000000E;
+    internal const uint WtsSessionLogon = 0x00000005;
     internal const uint WtsSessionLogoff = 0x00000006;
     internal const uint ErrorFailedServiceControllerConnect = 1063;
     internal const uint ErrorNoToken = 1008;
@@ -53,6 +54,11 @@ internal static partial class NativeMethods
     {
         Primary = 1,
         Impersonation,
+    }
+
+    internal enum TokenInformationClass
+    {
+        TokenStatistics = 10,
     }
 
     internal enum JobObjectInformationClass
@@ -148,6 +154,28 @@ internal static partial class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct Luid
+    {
+        internal uint LowPart;
+        internal int HighPart;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TokenStatistics
+    {
+        internal Luid TokenId;
+        internal Luid AuthenticationId;
+        internal long ExpirationTime;
+        internal TokenType TokenType;
+        internal SecurityImpersonationLevel ImpersonationLevel;
+        internal uint DynamicCharged;
+        internal uint DynamicAvailable;
+        internal uint GroupCount;
+        internal uint PrivilegeCount;
+        internal Luid ModifiedId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct WtsSessionNotification
     {
         internal uint Size;
@@ -176,6 +204,15 @@ internal static partial class NativeMethods
     [LibraryImport("wtsapi32.dll", EntryPoint = "WTSQueryUserToken", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static partial bool QueryUserToken(uint sessionId, out nint token);
+
+    [LibraryImport("advapi32.dll", EntryPoint = "GetTokenInformation", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static partial bool GetTokenInformation(
+        SafeKernelHandle tokenHandle,
+        TokenInformationClass tokenInformationClass,
+        out TokenStatistics tokenInformation,
+        uint tokenInformationLength,
+        out uint returnLength);
 
     [LibraryImport("advapi32.dll", EntryPoint = "DuplicateTokenEx", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

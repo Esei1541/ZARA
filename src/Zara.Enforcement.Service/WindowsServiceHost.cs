@@ -19,14 +19,13 @@ internal static class WindowsServiceHost
     private static readonly TimeSpan ActiveSessionPollInterval = TimeSpan.FromSeconds(1);
 
     private static readonly object StatusGate = new();
-    private static readonly object GenerationGate = new();
+    private static readonly ActiveConsoleGenerationCoordinator GenerationCoordinator = new();
     private static readonly ServiceMainCallback ServiceMainCallbackRoot = ServiceMain;
     private static readonly ServiceControlHandlerCallback ServiceControlHandlerCallbackRoot =
         HandleServiceControl;
 
     private static nint _statusHandle;
     private static CancellationTokenSource? _serviceStopping;
-    private static ActiveConsoleGeneration? _activeGeneration;
     private static uint _checkPoint;
 
     /// <summary>
@@ -136,11 +135,7 @@ internal static class WindowsServiceHost
         {
             _serviceStopping?.Dispose();
             _serviceStopping = null;
-            lock (GenerationGate)
-            {
-                _activeGeneration = null;
-            }
-
+            GenerationCoordinator.Reset();
             _statusHandle = nint.Zero;
         }
     }
@@ -166,7 +161,6 @@ internal static class WindowsServiceHost
         ArgumentNullException.ThrowIfNull(runGeneration);
 
         ActiveConsoleSessionTarget? previouslyEndedTarget = null;
-        bool previouslyEndedTargetWasUnavailable = false;
 
         while (true)
         {
@@ -175,7 +169,6 @@ internal static class WindowsServiceHost
                     readTarget,
                     delay,
                     previouslyEndedTarget,
-                    previouslyEndedTargetWasUnavailable,
                     cancellationToken)
                 .ConfigureAwait(false);
             SessionGenerationRunResult result = await runGeneration(target, cancellationToken)
@@ -186,7 +179,6 @@ internal static class WindowsServiceHost
             }
 
             previouslyEndedTarget = target;
-            previouslyEndedTargetWasUnavailable = result.TargetWasObservedUnavailable;
         }
     }
 
@@ -212,18 +204,19 @@ internal static class WindowsServiceHost
             target.UserSid,
             requireInitialServiceLaunch: true);
 
-        SetActiveGeneration(generation);
-        bool targetWasObservedUnavailable = false;
+        if (!GenerationCoordinator.TryActivate(generation, target.LifecycleVersion))
+        {
+            _ = generation.TryEndSession(target.SessionId);
+            return new(SessionEnded: true);
+        }
+
         try
         {
             // A logoff can race between selecting the console token and publishing the generation
-            // to the SCM callback. Rechecking here closes that gap without starting a stale child.
-            ActiveConsoleSessionTarget? currentTarget = TryGetActiveConsoleSessionTarget();
-            if (currentTarget is null || !IsSameTarget(currentTarget.Value, target))
-            {
-                targetWasObservedUnavailable = currentTarget is null;
-                _ = generation.TryEndSession(target.SessionId);
-            }
+            // to the SCM callback. Confirming the exact logon token here closes that gap without
+            // treating a transient token-query failure as a new login.
+            await ConfirmGenerationTargetAsync(generation, serviceCancellationToken)
+                .ConfigureAwait(false);
 
             bool sessionEnded = await RunGenerationComponentsAsync(
                     supervisor.RunAsync,
@@ -231,11 +224,34 @@ internal static class WindowsServiceHost
                     generation.SessionEnded,
                     serviceCancellationToken)
                 .ConfigureAwait(false);
-            return new(sessionEnded, targetWasObservedUnavailable);
+            return new(sessionEnded);
         }
         finally
         {
-            ClearActiveGeneration(generation);
+            GenerationCoordinator.Clear(generation);
+        }
+    }
+
+    private static async Task ConfirmGenerationTargetAsync(
+        ActiveConsoleGeneration generation,
+        CancellationToken serviceCancellationToken)
+    {
+        while (!generation.SessionEnded.IsCompleted)
+        {
+            serviceCancellationToken.ThrowIfCancellationRequested();
+            ActiveConsoleSessionTarget? currentTarget = TryGetActiveConsoleSessionTarget();
+            if (currentTarget is not null)
+            {
+                if (!IsSameTarget(currentTarget.Value, generation.Target))
+                {
+                    _ = generation.TryEndSession(generation.Target.SessionId);
+                }
+
+                return;
+            }
+
+            await Task.Delay(ActiveSessionPollInterval, serviceCancellationToken)
+                .ConfigureAwait(false);
         }
     }
 
@@ -248,6 +264,12 @@ internal static class WindowsServiceHost
         ArgumentNullException.ThrowIfNull(runSupervision);
         ArgumentNullException.ThrowIfNull(runTransport);
         ArgumentNullException.ThrowIfNull(sessionEnded);
+
+        if (sessionEnded.IsCompletedSuccessfully)
+        {
+            serviceCancellationToken.ThrowIfCancellationRequested();
+            return true;
+        }
 
         using var componentCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             serviceCancellationToken);
@@ -312,31 +334,6 @@ internal static class WindowsServiceHost
         }
     }
 
-    private static void SetActiveGeneration(ActiveConsoleGeneration generation)
-    {
-        lock (GenerationGate)
-        {
-            if (_activeGeneration is not null)
-            {
-                throw new InvalidOperationException(
-                    "A previous console generation is still active.");
-            }
-
-            _activeGeneration = generation;
-        }
-    }
-
-    private static void ClearActiveGeneration(ActiveConsoleGeneration generation)
-    {
-        lock (GenerationGate)
-        {
-            if (ReferenceEquals(_activeGeneration, generation))
-            {
-                _activeGeneration = null;
-            }
-        }
-    }
-
     private static uint HandleServiceControl(
         uint control,
         uint eventType,
@@ -361,8 +358,9 @@ internal static class WindowsServiceHost
                     break;
 
                 case NativeMethods.ServiceControlSessionChange
-                    when eventType == NativeMethods.WtsSessionLogoff:
-                    EndActiveGeneration(eventData);
+                    when eventType is NativeMethods.WtsSessionLogon or
+                        NativeMethods.WtsSessionLogoff:
+                    ObserveConsoleSessionChange(eventType, eventData);
                     break;
             }
         }
@@ -374,7 +372,7 @@ internal static class WindowsServiceHost
         return 0;
     }
 
-    private static void EndActiveGeneration(nint eventData)
+    private static void ObserveConsoleSessionChange(uint eventType, nint eventData)
     {
         if (eventData == nint.Zero)
         {
@@ -388,13 +386,9 @@ internal static class WindowsServiceHost
             return;
         }
 
-        ActiveConsoleGeneration? generation;
-        lock (GenerationGate)
-        {
-            generation = _activeGeneration;
-        }
-
-        _ = generation?.TryEndSession((int)notification.SessionId);
+        GenerationCoordinator.ObserveSessionChange(
+            (int)notification.SessionId,
+            isLoggedOn: eventType == NativeMethods.WtsSessionLogon);
     }
 
     /// <summary>
@@ -419,36 +413,29 @@ internal static class WindowsServiceHost
                 readTarget,
                 delay,
                 previouslyEndedTarget: null,
-                previouslyEndedTargetWasUnavailable: false,
                 cancellationToken)
             .ConfigureAwait(false);
 
     /// <summary>
-    /// Waits for the next console logon without reselecting a target that is still disappearing
-    /// after logoff. The same target may be accepted again only after it was observed unavailable.
+    /// Waits for a console logon with a different session or Windows authentication identifier.
+    /// A transient token-query failure never authorizes the previously ended generation again.
     /// </summary>
     internal static async Task<ActiveConsoleSessionTarget> WaitForNextActiveConsoleSessionAsync(
         Func<ActiveConsoleSessionTarget?> readTarget,
         Func<TimeSpan, CancellationToken, Task> delay,
         ActiveConsoleSessionTarget? previouslyEndedTarget,
-        bool previouslyEndedTargetWasUnavailable,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(readTarget);
         ArgumentNullException.ThrowIfNull(delay);
 
-        bool previousTargetWasUnavailable = previouslyEndedTargetWasUnavailable;
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             ActiveConsoleSessionTarget? target = readTarget();
-            if (target is null)
-            {
-                previousTargetWasUnavailable = true;
-            }
-            else if (previouslyEndedTarget is null ||
-                     previousTargetWasUnavailable ||
-                     !IsSameTarget(target.Value, previouslyEndedTarget.Value))
+            if (target is not null &&
+                (previouslyEndedTarget is null ||
+                 !IsSameTarget(target.Value, previouslyEndedTarget.Value)))
             {
                 return target.Value;
             }
@@ -460,12 +447,21 @@ internal static class WindowsServiceHost
     private static bool IsSameTarget(
         ActiveConsoleSessionTarget left,
         ActiveConsoleSessionTarget right) =>
-        left.SessionId == right.SessionId && left.UserSid.Equals(right.UserSid);
+        left.SessionId == right.SessionId &&
+        left.UserSid.Equals(right.UserSid) &&
+        left.AuthenticationId == right.AuthenticationId;
 
     private static ActiveConsoleSessionTarget? TryGetActiveConsoleSessionTarget()
     {
         uint sessionId = NativeMethods.GetActiveConsoleSessionId();
-        if (sessionId == NativeMethods.InvalidSessionId || sessionId > int.MaxValue ||
+        if (sessionId == NativeMethods.InvalidSessionId || sessionId > int.MaxValue)
+        {
+            return null;
+        }
+
+        SessionLifecycleSnapshot? lifecycle = GenerationCoordinator.TryCapture(
+            (int)sessionId);
+        if (lifecycle is null ||
             !NativeMethods.QueryUserToken(sessionId, out nint tokenValue))
         {
             return null;
@@ -476,7 +472,30 @@ internal static class WindowsServiceHost
         SecurityIdentifier userSid = identity.User ??
             throw new InvalidOperationException(
                 "The active console session token did not contain a user SID.");
-        return new ActiveConsoleSessionTarget((int)sessionId, userSid);
+        uint statisticsSize = checked((uint)Marshal.SizeOf<NativeMethods.TokenStatistics>());
+        if (!NativeMethods.GetTokenInformation(
+                token,
+                NativeMethods.TokenInformationClass.TokenStatistics,
+                out NativeMethods.TokenStatistics statistics,
+                statisticsSize,
+                out _))
+        {
+            return null;
+        }
+
+        var authenticationId = new LogonSessionId(
+            statistics.AuthenticationId.LowPart,
+            statistics.AuthenticationId.HighPart);
+        if (!GenerationCoordinator.IsCurrent(lifecycle.Value))
+        {
+            return null;
+        }
+
+        return new ActiveConsoleSessionTarget(
+            (int)sessionId,
+            userSid,
+            authenticationId,
+            lifecycle.Value.Version);
     }
 
     private static void ReportStatus(
@@ -529,7 +548,128 @@ internal static class WindowsServiceHost
 /// <summary>Identifies the one interactive logon generation supervised by this Service run.</summary>
 internal readonly record struct ActiveConsoleSessionTarget(
     int SessionId,
-    SecurityIdentifier UserSid);
+    SecurityIdentifier UserSid,
+    LogonSessionId AuthenticationId,
+    long LifecycleVersion = 0);
+
+/// <summary>Identifies one Windows logon token generation independently of session-ID reuse.</summary>
+internal readonly record struct LogonSessionId(uint LowPart, int HighPart);
+
+/// <summary>
+/// Coordinates SCM session notifications with selection and publication of one active generation.
+/// A lifecycle version prevents a logoff delivered between token lookup and generation activation
+/// from being lost.
+/// </summary>
+internal sealed class ActiveConsoleGenerationCoordinator
+{
+    private readonly object _gate = new();
+    private readonly Dictionary<int, SessionLifecycleState> _sessionStates = [];
+    private ActiveConsoleGeneration? _activeGeneration;
+    private long _nextVersion;
+
+    public SessionLifecycleSnapshot? TryCapture(int sessionId)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(sessionId);
+
+        lock (_gate)
+        {
+            if (_sessionStates.TryGetValue(sessionId, out SessionLifecycleState state))
+            {
+                return state.IsLoggedOn
+                    ? new SessionLifecycleSnapshot(sessionId, state.Version)
+                    : null;
+            }
+
+            return new SessionLifecycleSnapshot(sessionId, Version: 0);
+        }
+    }
+
+    public bool IsCurrent(SessionLifecycleSnapshot snapshot)
+    {
+        lock (_gate)
+        {
+            return IsCurrentUnsafe(snapshot.SessionId, snapshot.Version);
+        }
+    }
+
+    public bool TryActivate(ActiveConsoleGeneration generation, long lifecycleVersion)
+    {
+        ArgumentNullException.ThrowIfNull(generation);
+
+        lock (_gate)
+        {
+            if (_activeGeneration is not null)
+            {
+                throw new InvalidOperationException(
+                    "A previous console generation is still active.");
+            }
+
+            if (!IsCurrentUnsafe(generation.Target.SessionId, lifecycleVersion))
+            {
+                return false;
+            }
+
+            _activeGeneration = generation;
+            return true;
+        }
+    }
+
+    public void ObserveSessionChange(int sessionId, bool isLoggedOn)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(sessionId);
+        ActiveConsoleGeneration? generationToEnd = null;
+
+        lock (_gate)
+        {
+            long version = checked(++_nextVersion);
+            _sessionStates[sessionId] = new SessionLifecycleState(version, isLoggedOn);
+            if (!isLoggedOn && _activeGeneration?.Target.SessionId == sessionId)
+            {
+                generationToEnd = _activeGeneration;
+            }
+        }
+
+        _ = generationToEnd?.TryEndSession(sessionId);
+    }
+
+    public void Clear(ActiveConsoleGeneration generation)
+    {
+        ArgumentNullException.ThrowIfNull(generation);
+
+        lock (_gate)
+        {
+            if (ReferenceEquals(_activeGeneration, generation))
+            {
+                _activeGeneration = null;
+            }
+        }
+    }
+
+    public void Reset()
+    {
+        lock (_gate)
+        {
+            _activeGeneration = null;
+            _sessionStates.Clear();
+            _nextVersion = 0;
+        }
+    }
+
+    private bool IsCurrentUnsafe(int sessionId, long lifecycleVersion)
+    {
+        if (_sessionStates.TryGetValue(sessionId, out SessionLifecycleState state))
+        {
+            return state.IsLoggedOn && state.Version == lifecycleVersion;
+        }
+
+        return lifecycleVersion == 0;
+    }
+
+    private readonly record struct SessionLifecycleState(long Version, bool IsLoggedOn);
+}
+
+/// <summary>Captures the most recent SCM lifecycle event for one console session.</summary>
+internal readonly record struct SessionLifecycleSnapshot(int SessionId, long Version);
 
 /// <summary>
 /// Owns the end signal and command state for one exact interactive logon generation.
@@ -574,5 +714,4 @@ internal sealed class ActiveConsoleGeneration
 
 /// <summary>Describes why one active-console generation stopped running.</summary>
 internal readonly record struct SessionGenerationRunResult(
-    bool SessionEnded,
-    bool TargetWasObservedUnavailable);
+    bool SessionEnded);

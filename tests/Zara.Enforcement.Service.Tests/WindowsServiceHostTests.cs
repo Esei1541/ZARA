@@ -24,7 +24,8 @@ public sealed class WindowsServiceHostTests
         int delays = 0;
         var expected = new ActiveConsoleSessionTarget(
             SessionId: 12,
-            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null));
+            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null),
+            new LogonSessionId(LowPart: 10, HighPart: 20));
 
         ActiveConsoleSessionTarget actual = await WindowsServiceHost
             .WaitForActiveConsoleSessionAsync(
@@ -70,8 +71,14 @@ public sealed class WindowsServiceHostTests
         var userSid = new SecurityIdentifier(
             WellKnownSidType.BuiltinUsersSid,
             domainSid: null);
-        var ended = new ActiveConsoleSessionTarget(SessionId: 12, userSid);
-        var next = new ActiveConsoleSessionTarget(SessionId: 13, userSid);
+        var ended = new ActiveConsoleSessionTarget(
+            SessionId: 12,
+            userSid,
+            new LogonSessionId(LowPart: 10, HighPart: 20));
+        var next = new ActiveConsoleSessionTarget(
+            SessionId: 13,
+            userSid,
+            new LogonSessionId(LowPart: 11, HighPart: 20));
         var readings = new Queue<ActiveConsoleSessionTarget?>([ended, ended, next]);
         int delays = 0;
 
@@ -85,7 +92,6 @@ public sealed class WindowsServiceHostTests
                     return Task.CompletedTask;
                 },
                 ended,
-                previouslyEndedTargetWasUnavailable: false,
                 CancellationToken.None);
 
         Assert.AreEqual(next, actual);
@@ -93,12 +99,17 @@ public sealed class WindowsServiceHostTests
     }
 
     [TestMethod]
-    public async Task WaitForNextActiveSessionAcceptsSameTargetAfterUnavailableGap()
+    public async Task WaitForNextActiveSessionDoesNotAcceptSameLogonAfterTransientGap()
     {
         var target = new ActiveConsoleSessionTarget(
             SessionId: 12,
-            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null));
-        var readings = new Queue<ActiveConsoleSessionTarget?>([null, target]);
+            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null),
+            new LogonSessionId(LowPart: 10, HighPart: 20));
+        var next = target with
+        {
+            AuthenticationId = new LogonSessionId(LowPart: 11, HighPart: 20),
+        };
+        var readings = new Queue<ActiveConsoleSessionTarget?>([null, target, next]);
         int delays = 0;
 
         ActiveConsoleSessionTarget actual = await WindowsServiceHost
@@ -111,11 +122,10 @@ public sealed class WindowsServiceHostTests
                     return Task.CompletedTask;
                 },
                 target,
-                previouslyEndedTargetWasUnavailable: false,
                 CancellationToken.None);
 
-        Assert.AreEqual(target, actual);
-        Assert.AreEqual(1, delays);
+        Assert.AreEqual(next, actual);
+        Assert.AreEqual(2, delays);
     }
 
     [TestMethod]
@@ -123,7 +133,8 @@ public sealed class WindowsServiceHostTests
     {
         var target = new ActiveConsoleSessionTarget(
             SessionId: 12,
-            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null));
+            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null),
+            new LogonSessionId(LowPart: 10, HighPart: 20));
         var commandSource = new LatestSupervisionCommandSource(
             WindowsServiceHost.CreateInitialSupervisionDirective());
         var generation = new ActiveConsoleGeneration(target, commandSource);
@@ -141,6 +152,50 @@ public sealed class WindowsServiceHostTests
             SupervisionDirectiveReason.SessionEnding,
             commandSource.Current.Reason);
         Assert.IsTrue(generation.TryEndSession(sessionId: 12));
+    }
+
+    [TestMethod]
+    public void LogoffBetweenTargetCaptureAndActivationRejectsGeneration()
+    {
+        var coordinator = new ActiveConsoleGenerationCoordinator();
+        SessionLifecycleSnapshot snapshot = coordinator.TryCapture(sessionId: 12) ??
+            throw new AssertFailedException("An unknown session should be selectable.");
+        var target = new ActiveConsoleSessionTarget(
+            SessionId: 12,
+            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null),
+            new LogonSessionId(LowPart: 10, HighPart: 20),
+            snapshot.Version);
+        var commandSource = new LatestSupervisionCommandSource(
+            WindowsServiceHost.CreateInitialSupervisionDirective());
+        var generation = new ActiveConsoleGeneration(target, commandSource);
+
+        coordinator.ObserveSessionChange(sessionId: 12, isLoggedOn: false);
+
+        Assert.IsFalse(coordinator.TryActivate(generation, snapshot.Version));
+    }
+
+    [TestMethod]
+    public void NewLogonAfterLogoffCanActivateSameSessionId()
+    {
+        var coordinator = new ActiveConsoleGenerationCoordinator();
+        coordinator.ObserveSessionChange(sessionId: 12, isLoggedOn: false);
+        Assert.IsNull(coordinator.TryCapture(sessionId: 12));
+
+        coordinator.ObserveSessionChange(sessionId: 12, isLoggedOn: true);
+        SessionLifecycleSnapshot snapshot = coordinator.TryCapture(sessionId: 12) ??
+            throw new AssertFailedException("The new logon should be selectable.");
+        var target = new ActiveConsoleSessionTarget(
+            SessionId: 12,
+            new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null),
+            new LogonSessionId(LowPart: 11, HighPart: 20),
+            snapshot.Version);
+        var generation = new ActiveConsoleGeneration(
+            target,
+            new LatestSupervisionCommandSource(
+                WindowsServiceHost.CreateInitialSupervisionDirective()));
+
+        Assert.IsTrue(coordinator.TryActivate(generation, snapshot.Version));
+        coordinator.Clear(generation);
     }
 
     [TestMethod]
@@ -198,6 +253,26 @@ public sealed class WindowsServiceHostTests
     }
 
     [TestMethod]
+    public async Task AlreadyEndedGenerationDoesNotStartComponents()
+    {
+        int starts = 0;
+
+        Task StartComponent(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Interlocked.Increment(ref starts);
+            return Task.CompletedTask;
+        }
+
+        Assert.IsTrue(await WindowsServiceHost.RunGenerationComponentsAsync(
+            StartComponent,
+            StartComponent,
+            Task.CompletedTask,
+            CancellationToken.None));
+        Assert.AreEqual(0, starts);
+    }
+
+    [TestMethod]
     public async Task ComponentFailureCancelsPeerAndPropagatesFailure()
     {
         var peerStarted = new TaskCompletionSource(
@@ -249,8 +324,14 @@ public sealed class WindowsServiceHostTests
         var userSid = new SecurityIdentifier(
             WellKnownSidType.BuiltinUsersSid,
             domainSid: null);
-        var first = new ActiveConsoleSessionTarget(SessionId: 12, userSid);
-        var second = new ActiveConsoleSessionTarget(SessionId: 13, userSid);
+        var first = new ActiveConsoleSessionTarget(
+            SessionId: 12,
+            userSid,
+            new LogonSessionId(LowPart: 10, HighPart: 20));
+        var second = new ActiveConsoleSessionTarget(
+            SessionId: 13,
+            userSid,
+            new LogonSessionId(LowPart: 11, HighPart: 20));
         var targets = new Queue<ActiveConsoleSessionTarget?>([first, second]);
         var startedSessions = new List<int>();
 
@@ -264,8 +345,7 @@ public sealed class WindowsServiceHostTests
                 bool firstGeneration = startedSessions.Count == 1;
                 return Task.FromResult(
                     new SessionGenerationRunResult(
-                        SessionEnded: firstGeneration,
-                        TargetWasObservedUnavailable: false));
+                        SessionEnded: firstGeneration));
             },
             CancellationToken.None);
 
