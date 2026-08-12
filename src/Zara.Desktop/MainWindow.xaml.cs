@@ -1,6 +1,5 @@
 using System.ComponentModel;
 using System.Windows;
-using System.Windows.Threading;
 using Zara.Application.UsagePolicy;
 using Zara.Core.UsagePolicy;
 using Zara.Desktop.ViewModels;
@@ -10,7 +9,6 @@ namespace Zara.Desktop;
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
-    private readonly DispatcherTimer _reservationPresentationTimer;
 
     internal MainWindow(MainWindowViewModel viewModel)
     {
@@ -18,12 +16,6 @@ public partial class MainWindow : Window
         InitializeComponent();
         DataContext = _viewModel;
         _viewModel.NotificationRequested += OnNotificationRequested;
-        _reservationPresentationTimer = new DispatcherTimer(DispatcherPriority.Background)
-        {
-            Interval = TimeSpan.FromSeconds(10),
-        };
-        _reservationPresentationTimer.Tick += OnReservationPresentationTimerTick;
-        _reservationPresentationTimer.Start();
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -37,23 +29,12 @@ public partial class MainWindow : Window
         base.OnClosing(e);
     }
 
-    protected override void OnActivated(EventArgs e)
-    {
-        base.OnActivated(e);
-        _viewModel.RefreshReservationPresentation();
-    }
-
     protected override void OnClosed(EventArgs e)
     {
-        _reservationPresentationTimer.Stop();
-        _reservationPresentationTimer.Tick -= OnReservationPresentationTimerTick;
         _viewModel.NotificationRequested -= OnNotificationRequested;
         _viewModel.Dispose();
         base.OnClosed(e);
     }
-
-    private void OnReservationPresentationTimerTick(object? sender, EventArgs e) =>
-        _viewModel.RefreshReservationPresentation();
 
     private void OnNotificationRequested(
         object? sender,
@@ -89,6 +70,12 @@ public partial class MainWindow : Window
         {
             ShowMessage(exception.Message, MessageBoxImage.Information);
         }
+        catch (UsagePolicySettingsSavedButApplyFailedException)
+        {
+            ShowMessage(
+                MainWindowViewModel.SavedButApplyFailedMessage,
+                MessageBoxImage.Error);
+        }
         catch (Exception)
         {
             ShowMessage("예약을 등록하지 못했습니다. 잠시 후 다시 시도하세요.", MessageBoxImage.Error);
@@ -112,6 +99,12 @@ public partial class MainWindow : Window
         catch (UsagePolicySettingsLockedException)
         {
             ShowMessage("사용 금지 시간에는 설정을 변경할 수 없습니다.", MessageBoxImage.Information);
+        }
+        catch (UsagePolicySettingsSavedButApplyFailedException)
+        {
+            ShowMessage(
+                MainWindowViewModel.SavedButApplyFailedMessage,
+                MessageBoxImage.Error);
         }
         catch (Exception)
         {

@@ -16,6 +16,9 @@ namespace Zara.Desktop.ViewModels;
 /// </summary>
 internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 {
+    internal const string SavedButApplyFailedMessage =
+        "설정은 저장했습니다. 현재 잠금 상태를 적용하지 못해 자동으로 다시 시도합니다.";
+
     private readonly Func<bool, Task> _updateRestartSetting;
     private readonly AsyncCommand _toggleRestartSettingCommand;
     private readonly AsyncCommand _saveUsagePolicySettingsCommand;
@@ -188,12 +191,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         CancellationToken cancellationToken = default) =>
         RequireUsagePolicyRuntime().RemoveReservationAsync(reservationId, cancellationToken);
 
-    /// <summary>
-    /// Refreshes display-only past and active reservation state from the current local Windows time.
-    /// </summary>
-    internal void RefreshReservationPresentation() =>
-        UpdateReservationPresentation(DateTime.Now, CanChangeSettings);
-
     /// <summary>Stops observing runtime snapshots when the containing desktop window is disposed.</summary>
     public void Dispose()
     {
@@ -314,6 +311,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             _loadedReservations = snapshot.Settings.Reservations.ToArray();
         }
 
+        UpdateReservationPresentation(
+            snapshot.EvaluatedLocalTime,
+            snapshot.Evaluation.IsSettingsChangeAllowed);
         UsagePolicyStatusMessage = GetUsagePolicyStatusMessage(snapshot);
         OnPropertyChanged(nameof(CanChangeSettings));
         OnPropertyChanged(nameof(CanChangeUsagePolicySettings));
@@ -329,7 +329,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             Reservations.Add(new ReservationRowViewModel(reservation));
         }
 
-        UpdateReservationPresentation(DateTime.Now, CanChangeSettings);
         ReservationsView.Refresh();
     }
 
@@ -408,7 +407,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         string message = exception switch
         {
             UsagePolicySettingsSavedButApplyFailedException =>
-                "설정은 저장했습니다. 현재 잠금 상태를 적용하지 못해 자동으로 다시 시도합니다.",
+                SavedButApplyFailedMessage,
             UsagePolicySettingsLockedException => "사용 금지 시간에는 설정을 변경할 수 없습니다.",
             ArgumentException => exception.Message,
             _ => "설정을 저장하지 못했습니다. 잠시 후 다시 시도하세요.",

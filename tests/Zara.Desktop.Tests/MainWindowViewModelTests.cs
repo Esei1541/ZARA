@@ -111,6 +111,34 @@ public sealed class MainWindowViewModelTests
     }
 
     [STATestMethod]
+    public async Task ReservationPresentationUsesTheRuntimeEvaluationTime()
+    {
+        var timeProvider = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero));
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(),
+            new DateOnly(2026, 8, 10),
+            new TimeOnly(8, 0),
+            new TimeOnly(8, 1),
+            "시험");
+        using var runtime = CreateRuntime(
+            new RecordingStore(new UsagePolicySettings(
+                WeeklyUsageRestrictionSchedule.Default,
+                EmergencyUnlockSettings.Default,
+                [reservation])),
+            timeProvider);
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+
+        Assert.IsTrue(viewModel.Reservations.Single().IsActive);
+
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 8, 1, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+
+        Assert.IsFalse(viewModel.Reservations.Single().IsActive);
+    }
+
+    [STATestMethod]
     public async Task RepeatedSuccessfulSavesRaiseFreshNotificationsEveryTime()
     {
         var store = new RecordingStore(UsagePolicySettings.Default);
