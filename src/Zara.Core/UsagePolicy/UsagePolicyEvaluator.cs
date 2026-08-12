@@ -45,6 +45,103 @@ public static class UsagePolicyEvaluator
     }
 
     /// <summary>
+    /// Finds the first local time at or after <paramref name="localNow"/> when the configured
+    /// policy actually requires the lock.
+    /// </summary>
+    /// <remarks>
+    /// Weekday restrictions repeat every week. Reservation intervals and the optional current
+    /// emergency unlock suppress the lock, so a reservation that covers a restriction start can
+    /// move the result to the reservation end or to a later weekly occurrence. When the lock is
+    /// already required at <paramref name="localNow"/>, this method returns
+    /// <paramref name="localNow"/> itself. Restriction and reservation starts are inclusive, while
+    /// their release and end times are exclusive.
+    /// </remarks>
+    /// <param name="settings">The immutable settings snapshot to inspect.</param>
+    /// <param name="localNow">The current local calendar date and time.</param>
+    /// <param name="emergencyUnlockEndLocalTime">
+    /// The local time when a currently active emergency unlock ends. A value later than
+    /// <paramref name="localNow"/> suppresses locking until that instant. A null, equal, or earlier
+    /// value means that no current emergency unlock affects this calculation.
+    /// </param>
+    /// <returns>
+    /// The first local lock-required time at or after <paramref name="localNow"/>, or
+    /// <see langword="null"/> when every weekday restriction is disabled or no later occurrence
+    /// can be represented by <see cref="DateTime"/>.
+    /// </returns>
+    public static DateTime? FindNextLockStart(
+        UsagePolicySettings settings,
+        DateTime localNow,
+        DateTime? emergencyUnlockEndLocalTime = null)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        DateTime? effectiveEmergencyUnlockEnd = emergencyUnlockEndLocalTime > localNow
+            ? emergencyUnlockEndLocalTime
+            : null;
+        if (IsLockRequiredAt(settings, localNow, effectiveEmergencyUnlockEnd))
+        {
+            return localNow;
+        }
+
+        if (!HasEnabledRestriction(settings.WeeklySchedule))
+        {
+            return null;
+        }
+
+        DateTime[] reservationEndCandidates = settings.Reservations
+            .Select(reservation => reservation.Date.ToDateTime(reservation.EndTime, localNow.Kind))
+            .Where(candidate => candidate > localNow)
+            .OrderBy(candidate => candidate)
+            .ToArray();
+        int reservationEndIndex = 0;
+
+        DateTime scheduleSearchStart = effectiveEmergencyUnlockEnd ?? localNow;
+        DateTime? nextRestrictionStart = FindNextRestrictionStart(
+            settings.WeeklySchedule,
+            scheduleSearchStart);
+        DateTime? emergencyUnlockEndCandidate = effectiveEmergencyUnlockEnd;
+
+        while (true)
+        {
+            DateTime? reservationEndCandidate =
+                reservationEndIndex < reservationEndCandidates.Length
+                    ? reservationEndCandidates[reservationEndIndex]
+                    : null;
+            DateTime? candidate = Earliest(
+                nextRestrictionStart,
+                reservationEndCandidate,
+                emergencyUnlockEndCandidate);
+            if (candidate is null)
+            {
+                return null;
+            }
+
+            if (IsLockRequiredAt(settings, candidate.Value, effectiveEmergencyUnlockEnd))
+            {
+                return candidate;
+            }
+
+            if (nextRestrictionStart == candidate)
+            {
+                nextRestrictionStart = FindNextRestrictionStart(
+                    settings.WeeklySchedule,
+                    candidate.Value);
+            }
+
+            while (reservationEndIndex < reservationEndCandidates.Length &&
+                   reservationEndCandidates[reservationEndIndex] == candidate)
+            {
+                reservationEndIndex++;
+            }
+
+            if (emergencyUnlockEndCandidate == candidate)
+            {
+                emergencyUnlockEndCandidate = null;
+            }
+        }
+    }
+
+    /// <summary>
     /// Adds a non-overlapping reservation without considering whether the reservation falls inside
     /// a currently configured weekday restriction.
     /// </summary>
@@ -124,6 +221,78 @@ public static class UsagePolicyEvaluator
             left.StartTime < right.EndTime &&
             right.StartTime < left.EndTime;
     }
+
+    private static DateTime? Earliest(
+        DateTime? first,
+        DateTime? second,
+        DateTime? third)
+    {
+        DateTime? earliest = first;
+        if (second is not null && (earliest is null || second < earliest))
+        {
+            earliest = second;
+        }
+
+        if (third is not null && (earliest is null || third < earliest))
+        {
+            earliest = third;
+        }
+
+        return earliest;
+    }
+
+    private static DateTime? FindNextRestrictionStart(
+        WeeklyUsageRestrictionSchedule schedule,
+        DateTime after)
+    {
+        DateTime firstDate = after.Date;
+        for (int dayOffset = 0; dayOffset <= 7; dayOffset++)
+        {
+            long candidateDateTicks = firstDate.Ticks + (TimeSpan.TicksPerDay * dayOffset);
+            if (candidateDateTicks > DateTime.MaxValue.Date.Ticks)
+            {
+                break;
+            }
+
+            var candidateDate = new DateTime(candidateDateTicks, after.Kind);
+            DailyUsageRestriction restriction = schedule.GetRestriction(candidateDate.DayOfWeek);
+            if (!restriction.IsEnabled)
+            {
+                continue;
+            }
+
+            DateTime candidate = candidateDate.Add(restriction.StartTime.ToTimeSpan());
+            if (candidate > after)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool HasEnabledRestriction(WeeklyUsageRestrictionSchedule schedule)
+    {
+        for (int dayValue = 0; dayValue < 7; dayValue++)
+        {
+            if (schedule.GetRestriction((DayOfWeek)dayValue).IsEnabled)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsLockRequiredAt(
+        UsagePolicySettings settings,
+        DateTime localTime,
+        DateTime? emergencyUnlockEndLocalTime) =>
+        Evaluate(
+            settings,
+            localTime,
+            emergencyUnlockEndLocalTime is DateTime unlockEnd && localTime < unlockEnd)
+        .LockRequired;
 
     private static bool IsBaseUsageRestrictionActive(
         WeeklyUsageRestrictionSchedule schedule,

@@ -50,11 +50,22 @@ internal sealed class DailyUsageRestrictionViewModel : INotifyPropertyChanged
     /// <summary>Gets the restriction release-time controls.</summary>
     public TimeSelectionViewModel ReleaseTime { get; }
 
-    /// <summary>Creates the immutable Core rule represented by this editor.</summary>
-    public DailyUsageRestriction ToRestriction() => new(
-        IsEnabled,
-        StartTime.ToTimeOnly(),
-        ReleaseTime.ToTimeOnly());
+    /// <summary>
+    /// Creates the immutable Core rule represented by this editor and reports the exact invalid
+    /// weekday field in Korean.
+    /// </summary>
+    public DailyUsageRestriction ToRestriction()
+    {
+        TimeOnly startTime = StartTime.ToTimeOnly($"{DisplayName} 시작 시각");
+        TimeOnly releaseTime = ReleaseTime.ToTimeOnly($"{DisplayName} 해제 시각");
+        if (IsEnabled && startTime == releaseTime)
+        {
+            throw new ArgumentException(
+                $"{DisplayName}의 시작 시각과 해제 시각은 다르게 입력하세요.");
+        }
+
+        return new DailyUsageRestriction(IsEnabled, startTime, releaseTime);
+    }
 
     /// <summary>Updates this editor from a persisted Core rule.</summary>
     public void Load(DailyUsageRestriction restriction)

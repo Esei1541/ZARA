@@ -1,4 +1,6 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
 using System.Windows.Input;
 using Zara.Application.UsagePolicy;
 
@@ -11,6 +13,7 @@ namespace Zara.Desktop.Overlays;
 internal sealed partial class EmergencyUnlockWindow : Window
 {
     private readonly Func<string, Task<bool>> _completeChallenge;
+    private readonly EmergencyUnlockInputMatcher _inputMatcher;
 
     internal EmergencyUnlockWindow(
         EmergencyUnlockChallenge challenge,
@@ -19,9 +22,11 @@ internal sealed partial class EmergencyUnlockWindow : Window
         ArgumentNullException.ThrowIfNull(challenge);
         _completeChallenge = completeChallenge ??
             throw new ArgumentNullException(nameof(completeChallenge));
+        _inputMatcher = new EmergencyUnlockInputMatcher(challenge);
         InitializeComponent();
-        DataContext = challenge;
+        InputTextBox.TextChanged += InputTextBox_TextChanged;
         System.Windows.DataObject.AddPastingHandler(InputTextBox, OnPasting);
+        RenderInputComparison(_inputMatcher.Compare(string.Empty));
         Loaded += (_, _) => InputTextBox.Focus();
     }
 
@@ -47,14 +52,58 @@ internal sealed partial class EmergencyUnlockWindow : Window
         System.Windows.DragEventArgs e) =>
         e.Handled = true;
 
+    private void InputTextBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        ValidationMessage.Text = string.Empty;
+        RenderInputComparison(_inputMatcher.Compare(InputTextBox.Text));
+    }
+
+    private void RenderInputComparison(EmergencyUnlockInputComparison comparison)
+    {
+        ChallengeTextBlock.Inlines.Clear();
+        foreach (EmergencyUnlockInputSegment segment in comparison.Segments)
+        {
+            AddSegment(segment);
+        }
+    }
+
+    private void AddSegment(EmergencyUnlockInputSegment segment)
+    {
+        System.Windows.Media.Brush foreground = segment.State switch
+        {
+            EmergencyUnlockInputState.Matched =>
+                (System.Windows.Media.Brush)FindResource("EmergencyUnlockMatchedTextBrush"),
+            EmergencyUnlockInputState.Mismatched =>
+                (System.Windows.Media.Brush)FindResource("EmergencyUnlockMismatchedTextBrush"),
+            _ => ChallengeTextBlock.Foreground,
+        };
+        string[] lines = segment.Text.Split('\n');
+        for (int lineIndex = 0; lineIndex < lines.Length; lineIndex++)
+        {
+            if (lineIndex > 0)
+            {
+                ChallengeTextBlock.Inlines.Add(new LineBreak());
+            }
+
+            if (lines[lineIndex].Length > 0)
+            {
+                ChallengeTextBlock.Inlines.Add(new Run(lines[lineIndex])
+                {
+                    Foreground = foreground,
+                });
+            }
+        }
+    }
+
     private async void Complete_Click(object sender, RoutedEventArgs e)
     {
         CompleteButton.IsEnabled = false;
         ValidationMessage.Text = string.Empty;
+        string enteredText = InputTextBox.Text;
 
         try
         {
-            bool completed = await _completeChallenge(InputTextBox.Text).ConfigureAwait(true);
+            bool completed = await _completeChallenge(enteredText).ConfigureAwait(true);
             if (completed)
             {
                 DialogResult = true;
@@ -62,8 +111,9 @@ internal sealed partial class EmergencyUnlockWindow : Window
                 return;
             }
 
-            ValidationMessage.Text = "입력한 문장이 일치하지 않습니다.";
-            InputTextBox.SelectAll();
+            ValidationMessage.Text = _inputMatcher.Compare(enteredText).IsExactMatch
+                ? "문장은 모두 일치하지만 긴급 해제를 시작하지 못했습니다. 다시 시도하세요."
+                : "빨간색으로 표시된 부분을 확인하세요.";
             InputTextBox.Focus();
         }
         catch (Exception exception)

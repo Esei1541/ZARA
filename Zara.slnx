@@ -9,4 +9,5 @@
   <Project Path="tests/Zara.Application.Tests/Zara.Application.Tests.csproj" />
   <Project Path="tests/Zara.Infrastructure.Windows.Tests/Zara.Infrastructure.Windows.Tests.csproj" />
   <Project Path="tests/Zara.Enforcement.Service.Tests/Zara.Enforcement.Service.Tests.csproj" />
+  <Project Path="tests/Zara.Desktop.Tests/Zara.Desktop.Tests.csproj" />
 </Solution>

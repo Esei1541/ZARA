@@ -46,6 +46,36 @@ public sealed class WindowsUsagePolicySettingsStoreTests
     }
 
     [TestMethod]
+    public async Task SecondSaveReplacesBothPrimaryAndLastKnownGoodSettings()
+    {
+        UsagePolicySettings first = CreateSettings();
+        UsagePolicySettings second = new(
+            WeeklyUsageRestrictionSchedule.Default.WithRestriction(
+                DayOfWeek.Thursday,
+                new DailyUsageRestriction(
+                    isEnabled: true,
+                    startTime: new TimeOnly(22, 45),
+                    releaseTime: new TimeOnly(6, 30))),
+            new EmergencyUnlockSettings(durationMinutes: 5, sentenceCount: 1),
+            Array.Empty<OutOfHoursReservation>());
+
+        using (var store = new WindowsUsagePolicySettingsStore(_settingsDirectoryPath))
+        {
+            await store.SaveAsync(first);
+            await store.SaveAsync(second);
+        }
+
+        using (var restartedStore = new WindowsUsagePolicySettingsStore(_settingsDirectoryPath))
+        {
+            AssertSettingsEqual(second, await restartedStore.LoadAsync());
+        }
+
+        File.Delete(GetSettingsFilePath());
+        using var backupOnlyStore = new WindowsUsagePolicySettingsStore(_settingsDirectoryPath);
+        AssertSettingsEqual(second, await backupOnlyStore.LoadAsync());
+    }
+
+    [TestMethod]
     public async Task CorruptJsonIsQuarantinedAndReturnsDefaultWithoutLastKnownGood()
     {
         const string corruptJson = "{ not valid json";

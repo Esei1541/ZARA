@@ -84,6 +84,89 @@ public sealed class UsagePolicyRuntimeTests
     }
 
     [TestMethod]
+    public async Task SavingASecondRestrictionAfterTheFirstEndsLocksAtTheNewStartTime()
+    {
+        var timeProvider = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(CreateSettings(
+            DayOfWeek.Monday,
+            new TimeOnly(9, 0),
+            new TimeOnly(9, 1)));
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), timeProvider);
+        await runtime.InitializeAsync();
+
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 9, 1, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+
+        WeeklyUsageRestrictionSchedule secondSchedule = CreateSchedule(
+            DayOfWeek.Monday,
+            new TimeOnly(9, 2),
+            new TimeOnly(10, 0));
+        await runtime.UpdateSettingsAsync(secondSchedule, EmergencyUnlockSettings.Default);
+
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 9, 2, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+
+        UsagePolicySettings persisted = await store.LoadAsync();
+        Assert.AreEqual(secondSchedule, persisted.WeeklySchedule);
+        Assert.AreEqual(1, store.SaveCount);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        CollectionAssert.AreEqual(
+            ExpectedUnlockThenLockRequirements,
+            lockPort.AppliedRequirements);
+    }
+
+    [TestMethod]
+    public async Task EmergencyUnlockSuppressesASecondRestrictionUntilItsDurationExpires()
+    {
+        var timeProvider = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(CreateSettings(
+            DayOfWeek.Monday,
+            new TimeOnly(9, 0),
+            new TimeOnly(9, 1),
+            sentenceCount: 0));
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), timeProvider);
+        await runtime.InitializeAsync();
+        await runtime.StartEmergencyUnlockAsync();
+
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 9, 1, 0, TimeSpan.Zero));
+        timeProvider.AdvanceMonotonic(TimeSpan.FromMinutes(1));
+        await runtime.RefreshAsync();
+
+        WeeklyUsageRestrictionSchedule secondSchedule = CreateSchedule(
+            DayOfWeek.Monday,
+            new TimeOnly(9, 2),
+            new TimeOnly(10, 0));
+        await runtime.UpdateSettingsAsync(
+            secondSchedule,
+            new EmergencyUnlockSettings(durationMinutes: 10, sentenceCount: 0));
+
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 9, 2, 0, TimeSpan.Zero));
+        timeProvider.AdvanceMonotonic(TimeSpan.FromMinutes(1));
+        await runtime.RefreshAsync();
+
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.IsWithinUsageBan);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        CollectionAssert.AreEqual(
+            ExpectedLockThenUnlockRequirements,
+            lockPort.AppliedRequirements);
+
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 9, 10, 0, TimeSpan.Zero));
+        timeProvider.AdvanceMonotonic(TimeSpan.FromMinutes(8));
+        await runtime.RefreshAsync();
+
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        CollectionAssert.AreEqual(
+            ExpectedUnlockThenLockRequirements,
+            lockPort.AppliedRequirements);
+    }
+
+    [TestMethod]
     public async Task StartEmergencyUnlockRefreshesTheCurrentWallClockBeforeGrantingAccess()
     {
         var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero));
@@ -269,9 +352,11 @@ public sealed class UsagePolicyRuntimeTests
             new TimeOnly(18, 0));
         lockPort.FailWhenLocking = true;
 
-        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+        UsagePolicySettingsSavedButApplyFailedException exception =
+            await Assert.ThrowsExactlyAsync<UsagePolicySettingsSavedButApplyFailedException>(
             () => runtime.UpdateSettingsAsync(updatedSchedule, EmergencyUnlockSettings.Default));
 
+        Assert.IsInstanceOfType<InvalidOperationException>(exception.InnerException);
         Assert.AreEqual(1, store.SaveCount);
         Assert.AreEqual(updatedSchedule, runtime.CurrentSnapshot.Settings.WeeklySchedule);
         Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);

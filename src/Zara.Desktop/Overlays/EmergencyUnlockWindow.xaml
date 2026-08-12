@@ -10,6 +10,12 @@
         WindowStartupLocation="CenterScreen"
         Topmost="True"
         Background="#FF12151C">
+  <Window.Resources>
+    <SolidColorBrush x:Key="EmergencyUnlockMatchedTextBrush"
+                     Color="#FF8FE3A4" />
+    <SolidColorBrush x:Key="EmergencyUnlockMismatchedTextBrush"
+                     Color="#FFFF8A8A" />
+  </Window.Resources>
   <Grid Margin="28">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto" />
@@ -39,10 +45,10 @@
             BorderThickness="1"
             CornerRadius="10">
       <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <TextBlock Foreground="White"
+        <TextBlock x:Name="ChallengeTextBlock"
+                   Foreground="White"
                    FontSize="16"
                    LineHeight="26"
-                   Text="{Binding ExpectedText}"
                    TextWrapping="Wrap" />
       </ScrollViewer>
     </Border>

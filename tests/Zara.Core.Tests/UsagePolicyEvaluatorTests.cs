@@ -105,6 +105,183 @@ public sealed class UsagePolicyEvaluatorTests
     }
 
     [TestMethod]
+    public void FindNextLockStartReturnsNullWhenEveryWeekdayIsDisabled()
+    {
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(
+            UsagePolicySettings.Default,
+            LocalTime(2026, 8, 10, 8, 0));
+
+        Assert.IsNull(nextLockStart);
+    }
+
+    [TestMethod]
+    public void FindNextLockStartReturnsCurrentTimeWhenLockIsAlreadyRequired()
+    {
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(9, 0), new TimeOnly(18, 0)));
+        DateTime localNow = LocalTime(2026, 8, 10, 10, 30);
+
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(settings, localNow);
+
+        Assert.AreEqual(localNow, nextLockStart);
+    }
+
+    [TestMethod]
+    public void FindNextLockStartFindsTheNextEnabledWeekday()
+    {
+        var tuesdayRestriction = new DailyUsageRestriction(
+            true,
+            new TimeOnly(9, 15),
+            new TimeOnly(10, 0));
+        UsagePolicySettings settings = SettingsWithRestriction(
+            DayOfWeek.Tuesday,
+            tuesdayRestriction);
+
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(
+            settings,
+            LocalTime(2026, 8, 10, 20, 0));
+
+        Assert.AreEqual(LocalTime(2026, 8, 11, 9, 15), nextLockStart);
+    }
+
+    [TestMethod]
+    public void FindNextLockStartRepeatsAnOvernightRestrictionAfterItsReleaseBoundary()
+    {
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(22, 0), new TimeOnly(6, 0)));
+
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(
+            settings,
+            LocalTime(2026, 8, 11, 6, 0));
+
+        Assert.AreEqual(LocalTime(2026, 8, 17, 22, 0), nextLockStart);
+    }
+
+    [TestMethod]
+    public void FindNextLockStartMovesToReservationEndInsideTheRestriction()
+    {
+        OutOfHoursReservation reservation = Reservation(
+            new DateOnly(2026, 8, 10),
+            new TimeOnly(8, 0),
+            new TimeOnly(10, 0));
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(9, 0), new TimeOnly(18, 0)),
+            reservation);
+
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(
+            settings,
+            LocalTime(2026, 8, 10, 8, 0));
+
+        Assert.AreEqual(LocalTime(2026, 8, 10, 10, 0), nextLockStart);
+    }
+
+    [TestMethod]
+    public void FindNextLockStartSkipsARestrictionFullyCoveredByAReservation()
+    {
+        OutOfHoursReservation reservation = Reservation(
+            new DateOnly(2026, 8, 10),
+            new TimeOnly(8, 0),
+            new TimeOnly(18, 0));
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(9, 0), new TimeOnly(18, 0)),
+            reservation);
+
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(
+            settings,
+            LocalTime(2026, 8, 10, 8, 0));
+
+        Assert.AreEqual(LocalTime(2026, 8, 17, 9, 0), nextLockStart);
+    }
+
+    [TestMethod]
+    public void FindNextLockStartPassesAcrossAdjacentReservations()
+    {
+        OutOfHoursReservation firstReservation = Reservation(
+            new DateOnly(2026, 8, 10),
+            new TimeOnly(8, 0),
+            new TimeOnly(10, 0));
+        OutOfHoursReservation secondReservation = Reservation(
+            new DateOnly(2026, 8, 10),
+            new TimeOnly(10, 0),
+            new TimeOnly(11, 0));
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(9, 0), new TimeOnly(18, 0)),
+            firstReservation,
+            secondReservation);
+
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(
+            settings,
+            LocalTime(2026, 8, 10, 8, 0));
+
+        Assert.AreEqual(LocalTime(2026, 8, 10, 11, 0), nextLockStart);
+    }
+
+    [TestMethod]
+    public void FindNextLockStartUsesReservationEndDuringAnOvernightRestriction()
+    {
+        OutOfHoursReservation reservation = Reservation(
+            new DateOnly(2026, 8, 11),
+            new TimeOnly(0, 0),
+            new TimeOnly(2, 0));
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(22, 0), new TimeOnly(6, 0)),
+            reservation);
+
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(
+            settings,
+            LocalTime(2026, 8, 11, 1, 0));
+
+        Assert.AreEqual(LocalTime(2026, 8, 11, 2, 0), nextLockStart);
+    }
+
+    [TestMethod]
+    public void FindNextLockStartUsesEmergencyUnlockEndInsideTheRestriction()
+    {
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(9, 0), new TimeOnly(18, 0)));
+
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(
+            settings,
+            LocalTime(2026, 8, 10, 10, 0),
+            emergencyUnlockEndLocalTime: LocalTime(2026, 8, 10, 11, 0));
+
+        Assert.AreEqual(LocalTime(2026, 8, 10, 11, 0), nextLockStart);
+    }
+
+    [TestMethod]
+    public void FindNextLockStartSkipsARestrictionCoveredByEmergencyUnlock()
+    {
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(9, 0), new TimeOnly(18, 0)));
+
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(
+            settings,
+            LocalTime(2026, 8, 10, 10, 0),
+            emergencyUnlockEndLocalTime: LocalTime(2026, 8, 10, 19, 0));
+
+        Assert.AreEqual(LocalTime(2026, 8, 17, 9, 0), nextLockStart);
+    }
+
+    [TestMethod]
+    public void FindNextLockStartWaitsForReservationWhenEmergencyUnlockEndsFirst()
+    {
+        OutOfHoursReservation reservation = Reservation(
+            new DateOnly(2026, 8, 10),
+            new TimeOnly(9, 30),
+            new TimeOnly(11, 0));
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(9, 0), new TimeOnly(18, 0)),
+            reservation);
+
+        DateTime? nextLockStart = UsagePolicyEvaluator.FindNextLockStart(
+            settings,
+            LocalTime(2026, 8, 10, 9, 45),
+            emergencyUnlockEndLocalTime: LocalTime(2026, 8, 10, 10, 0));
+
+        Assert.AreEqual(LocalTime(2026, 8, 10, 11, 0), nextLockStart);
+    }
+
+    [TestMethod]
     public void ReservationAndEmergencyUnlockReleaseTheLockButNotSettingChanges()
     {
         Guid reservationId = Guid.NewGuid();
@@ -252,8 +429,14 @@ public sealed class UsagePolicyEvaluatorTests
     private static UsagePolicySettings SettingsWithMondayRestriction(
         DailyUsageRestriction monday,
         params OutOfHoursReservation[] reservations) =>
+        SettingsWithRestriction(DayOfWeek.Monday, monday, reservations);
+
+    private static UsagePolicySettings SettingsWithRestriction(
+        DayOfWeek dayOfWeek,
+        DailyUsageRestriction restriction,
+        params OutOfHoursReservation[] reservations) =>
         new(
-            WeeklyUsageRestrictionSchedule.Default.WithRestriction(DayOfWeek.Monday, monday),
+            WeeklyUsageRestrictionSchedule.Default.WithRestriction(dayOfWeek, restriction),
             EmergencyUnlockSettings.Default,
             reservations);
 

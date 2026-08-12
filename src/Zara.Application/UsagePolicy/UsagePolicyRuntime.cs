@@ -248,10 +248,7 @@ public sealed class UsagePolicyRuntime : IDisposable
             {
                 EmergencyUnlockChallenge challenge = _pendingChallenge ??
                     throw new InvalidOperationException("No emergency unlock challenge is pending.");
-                if (!string.Equals(
-                        NormalizeLineEndings(enteredText),
-                        challenge.ExpectedText,
-                        StringComparison.Ordinal))
+                if (!EmergencyUnlockInputMatcher.IsExactMatch(challenge, enteredText))
                 {
                     return false;
                 }
@@ -290,12 +287,12 @@ public sealed class UsagePolicyRuntime : IDisposable
             await SetSettingsAndApplyAsync(settings, forceLockApply: false, cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch
+        catch (Exception exception)
         {
             // The new settings are already durable. Keep them in memory so the next refresh retries
             // the lock change using the persisted policy instead of continuing with an old snapshot.
             PublishSnapshotIfChanged(settings);
-            throw;
+            throw new UsagePolicySettingsSavedButApplyFailedException(exception);
         }
     }
 
@@ -304,10 +301,11 @@ public sealed class UsagePolicyRuntime : IDisposable
         bool forceLockApply,
         CancellationToken cancellationToken)
     {
+        DateTime localNow = GetCurrentLocalTime();
         bool emergencyUnlockActive = IsEmergencyUnlockActive(settings.EmergencyUnlock);
         UsagePolicyEvaluation evaluation = UsagePolicyEvaluator.Evaluate(
             settings,
-            GetCurrentLocalTime(),
+            localNow,
             emergencyUnlockActive);
         bool lockRequirementChanged = forceLockApply ||
             _lastAppliedLockRequirement != evaluation.LockRequired;
@@ -319,32 +317,62 @@ public sealed class UsagePolicyRuntime : IDisposable
             _lastAppliedLockRequirement = evaluation.LockRequired;
         }
 
-        PublishSnapshotIfChanged(settings, evaluation);
+        PublishSnapshotIfChanged(settings, evaluation, localNow);
     }
 
     private UsagePolicyRuntimeSnapshot CreateSnapshot(UsagePolicySettings settings)
     {
+        DateTime localNow = GetCurrentLocalTime();
         bool emergencyUnlockActive = IsEmergencyUnlockActive(settings.EmergencyUnlock);
+        DateTime? emergencyUnlockEndLocalTime = GetEmergencyUnlockEndLocalTime(
+            settings.EmergencyUnlock,
+            emergencyUnlockActive,
+            localNow);
         return new UsagePolicyRuntimeSnapshot(
             settings,
-            UsagePolicyEvaluator.Evaluate(settings, GetCurrentLocalTime(), emergencyUnlockActive),
-            _pendingChallenge is not null);
+            UsagePolicyEvaluator.Evaluate(settings, localNow, emergencyUnlockActive),
+            localNow,
+            _pendingChallenge is not null,
+            emergencyUnlockEndLocalTime,
+            UsagePolicyEvaluator.FindNextLockStart(
+                settings,
+                localNow,
+                emergencyUnlockEndLocalTime));
     }
 
     private void PublishSnapshotIfChanged(
         UsagePolicySettings settings,
-        UsagePolicyEvaluation? evaluation = null)
+        UsagePolicyEvaluation? evaluation = null,
+        DateTime? evaluatedLocalTime = null)
     {
         UsagePolicyRuntimeSnapshot nextSnapshot = evaluation is null
             ? CreateSnapshot(settings)
-            : new UsagePolicyRuntimeSnapshot(
-                settings,
-                evaluation,
-                _pendingChallenge is not null);
+            : CreateSnapshot(settings, evaluation, evaluatedLocalTime ?? GetCurrentLocalTime());
         if (!Equals(CurrentSnapshot, nextSnapshot))
         {
             PublishSnapshot(nextSnapshot);
         }
+    }
+
+    private UsagePolicyRuntimeSnapshot CreateSnapshot(
+        UsagePolicySettings settings,
+        UsagePolicyEvaluation evaluation,
+        DateTime localNow)
+    {
+        DateTime? emergencyUnlockEndLocalTime = GetEmergencyUnlockEndLocalTime(
+            settings.EmergencyUnlock,
+            evaluation.HasActiveEmergencyUnlock,
+            localNow);
+        return new UsagePolicyRuntimeSnapshot(
+            settings,
+            evaluation,
+            localNow,
+            _pendingChallenge is not null,
+            emergencyUnlockEndLocalTime,
+            UsagePolicyEvaluator.FindNextLockStart(
+                settings,
+                localNow,
+                emergencyUnlockEndLocalTime));
     }
 
     private bool IsEmergencyUnlockActive(EmergencyUnlockSettings settings)
@@ -362,6 +390,24 @@ public sealed class UsagePolicyRuntime : IDisposable
 
         _emergencyUnlockStartedTimestamp = null;
         return false;
+    }
+
+    private DateTime? GetEmergencyUnlockEndLocalTime(
+        EmergencyUnlockSettings settings,
+        bool emergencyUnlockActive,
+        DateTime localNow)
+    {
+        if (!emergencyUnlockActive ||
+            _emergencyUnlockStartedTimestamp is not long startedTimestamp)
+        {
+            return null;
+        }
+
+        TimeSpan remaining = TimeSpan.FromMinutes(settings.DurationMinutes) -
+            _timeProvider.GetElapsedTime(startedTimestamp);
+        return remaining > TimeSpan.Zero
+            ? localNow.Add(remaining)
+            : null;
     }
 
     private DateTime GetCurrentLocalTime() => _timeProvider.GetLocalNow().DateTime;
@@ -409,10 +455,6 @@ public sealed class UsagePolicyRuntime : IDisposable
             _operationGate.Release();
         }
     }
-
-    private static string NormalizeLineEndings(string value) =>
-        value.Replace("\r\n", "\n", StringComparison.Ordinal)
-            .Replace('\r', '\n');
 
     private void ThrowIfDisposed() =>
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);

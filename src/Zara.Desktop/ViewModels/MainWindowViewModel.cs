@@ -28,7 +28,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private string _emergencySentenceCountText = EmergencyUnlockSettings.Default.SentenceCount
         .ToString(CultureInfo.InvariantCulture);
     private string _usagePolicyStatusMessage = "시간 규칙을 불러오는 중입니다.";
-    private string _operationMessage = string.Empty;
+    private WeeklyUsageRestrictionSchedule? _loadedWeeklySchedule;
+    private EmergencyUnlockSettings? _loadedEmergencyUnlockSettings;
+    private OutOfHoursReservation[] _loadedReservations = [];
     private int _disposed;
 
     /// <summary>
@@ -65,13 +67,13 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
         _toggleRestartSettingCommand = new AsyncCommand(
             ToggleRestartSettingAsync,
-            ReportFailure,
+            ReportSettingsFailure,
             () => CanChangeSettings);
         _saveUsagePolicySettingsCommand = new AsyncCommand(
             SaveUsagePolicySettingsAsync,
-            ReportFailure,
+            ReportSettingsFailure,
             () => CanChangeUsagePolicySettings);
-        StartLockDemoCommand = new AsyncCommand(requestLock, ReportFailure);
+        StartLockDemoCommand = new AsyncCommand(requestLock, ReportLockDemoFailure);
     }
 
     /// <summary>
@@ -91,6 +93,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>
+    /// Raised for each settings result so the owning window can show a fresh modal confirmation
+    /// instead of leaving an ambiguous status line on screen.
+    /// </summary>
+    public event EventHandler<MainWindowNotificationEventArgs>? NotificationRequested;
 
     /// <summary>Gets the weekday editors shown on the usage-ban tab.</summary>
     public ObservableCollection<DailyUsageRestrictionViewModel> WeekdayRestrictions { get; }
@@ -154,13 +162,6 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         private set => SetField(ref _usagePolicyStatusMessage, value);
     }
 
-    /// <summary>Gets the latest user-visible result of a settings command.</summary>
-    public string OperationMessage
-    {
-        get => _operationMessage;
-        private set => SetField(ref _operationMessage, value);
-    }
-
     /// <summary>
     /// Converts a completed reservation dialog result into a Core reservation and delegates the
     /// add operation to the runtime.
@@ -221,7 +222,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         {
             await _updateRestartSetting(requestedValue).ConfigureAwait(true);
             RestartOnExitWhenUnlocked = requestedValue;
-            OperationMessage = "정상 사용 시간의 자동 실행 설정을 저장했습니다.";
+            RequestNotification(
+                "정상 사용 시간의 자동 실행 설정을 저장했습니다.",
+                isError: false);
         }
         catch
         {
@@ -230,7 +233,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    private async Task SaveUsagePolicySettingsAsync()
+    internal async Task SaveUsagePolicySettingsAsync()
     {
         var emergencyUnlock = new EmergencyUnlockSettings(
             ParseEmergencySetting(
@@ -246,7 +249,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         await RequireUsagePolicyRuntime()
             .UpdateSettingsAsync(BuildWeeklySchedule(), emergencyUnlock)
             .ConfigureAwait(true);
-        OperationMessage = "사용 금지 시각과 긴급 해제 설정을 저장했습니다.";
+        RequestNotification(
+            "사용 금지 시각과 긴급 해제 설정을 저장했습니다.",
+            isError: false);
     }
 
     private WeeklyUsageRestrictionSchedule BuildWeeklySchedule()
@@ -284,16 +289,31 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         }
 
         _isSettingsChangeAllowed = snapshot.Evaluation.IsSettingsChangeAllowed;
-        foreach (DailyUsageRestrictionViewModel editor in WeekdayRestrictions)
+        if (!Equals(_loadedWeeklySchedule, snapshot.Settings.WeeklySchedule))
         {
-            editor.Load(snapshot.Settings.WeeklySchedule.GetRestriction(editor.DayOfWeek));
+            foreach (DailyUsageRestrictionViewModel editor in WeekdayRestrictions)
+            {
+                editor.Load(snapshot.Settings.WeeklySchedule.GetRestriction(editor.DayOfWeek));
+            }
+
+            _loadedWeeklySchedule = snapshot.Settings.WeeklySchedule;
         }
 
-        EmergencyDurationMinutesText = snapshot.Settings.EmergencyUnlock.DurationMinutes
-            .ToString(CultureInfo.InvariantCulture);
-        EmergencySentenceCountText = snapshot.Settings.EmergencyUnlock.SentenceCount
-            .ToString(CultureInfo.InvariantCulture);
-        ReplaceReservationRows(snapshot.Settings.Reservations);
+        if (!Equals(_loadedEmergencyUnlockSettings, snapshot.Settings.EmergencyUnlock))
+        {
+            EmergencyDurationMinutesText = snapshot.Settings.EmergencyUnlock.DurationMinutes
+                .ToString(CultureInfo.InvariantCulture);
+            EmergencySentenceCountText = snapshot.Settings.EmergencyUnlock.SentenceCount
+                .ToString(CultureInfo.InvariantCulture);
+            _loadedEmergencyUnlockSettings = snapshot.Settings.EmergencyUnlock;
+        }
+
+        if (!_loadedReservations.SequenceEqual(snapshot.Settings.Reservations))
+        {
+            ReplaceReservationRows(snapshot.Settings.Reservations);
+            _loadedReservations = snapshot.Settings.Reservations.ToArray();
+        }
+
         UsagePolicyStatusMessage = GetUsagePolicyStatusMessage(snapshot);
         OnPropertyChanged(nameof(CanChangeSettings));
         OnPropertyChanged(nameof(CanChangeUsagePolicySettings));
@@ -326,7 +346,22 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         UsagePolicyEvaluation evaluation = snapshot.Evaluation;
         if (!evaluation.IsWithinUsageBan)
         {
-            return "현재는 사용 금지 시간이 아닙니다.";
+            DateTime? nextLockStart = snapshot.NextLockStartLocalTime;
+            if (nextLockStart is null)
+            {
+                return "지금은 설정된 사용 금지 시각이 없습니다.";
+            }
+
+            long remainingSeconds = Math.Max(
+                0,
+                (long)Math.Ceiling(
+                    (nextLockStart.Value - snapshot.EvaluatedLocalTime).TotalSeconds));
+            long remainingHours = remainingSeconds / 3600;
+            long remainingMinutes = remainingSeconds % 3600 / 60;
+            long remainingSecondsPart = remainingSeconds % 60;
+            return string.Create(
+                CultureInfo.InvariantCulture,
+                $"다음 잠금까지 {remainingHours:00}:{remainingMinutes:00}:{remainingSecondsPart:00} 남았습니다.");
         }
 
         if (evaluation.HasActiveEmergencyUnlock)
@@ -368,15 +403,32 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private UsagePolicyRuntime RequireUsagePolicyRuntime() => _usagePolicyRuntime ??
         throw new InvalidOperationException("The usage-policy runtime is not initialized.");
 
-    private void ReportFailure(Exception exception)
+    private void ReportSettingsFailure(Exception exception)
     {
-        OperationMessage = exception switch
+        string message = exception switch
         {
+            UsagePolicySettingsSavedButApplyFailedException =>
+                "설정은 저장했습니다. 현재 잠금 상태를 적용하지 못해 자동으로 다시 시도합니다.",
             UsagePolicySettingsLockedException => "사용 금지 시간에는 설정을 변경할 수 없습니다.",
             ArgumentException => exception.Message,
             _ => "설정을 저장하지 못했습니다. 잠시 후 다시 시도하세요.",
         };
+        RequestNotification("설정 저장", message, isError: true);
     }
+
+    private void ReportLockDemoFailure(Exception _) =>
+        RequestNotification(
+            "잠금 화면 시연",
+            "잠금 화면을 열지 못했습니다. 잠시 후 다시 시도하세요.",
+            isError: true);
+
+    private void RequestNotification(string message, bool isError) =>
+        RequestNotification("설정 저장", message, isError);
+
+    private void RequestNotification(string title, string message, bool isError) =>
+        NotificationRequested?.Invoke(
+            this,
+            new MainWindowNotificationEventArgs(title, message, isError));
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
     {
@@ -392,4 +444,27 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+}
+
+/// <summary>Describes one user-visible modal result from the main window.</summary>
+internal sealed class MainWindowNotificationEventArgs : EventArgs
+{
+    /// <summary>Creates a notification with user-visible Korean text and severity.</summary>
+    internal MainWindowNotificationEventArgs(string title, string message, bool isError)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(title);
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        Title = title;
+        Message = message;
+        IsError = isError;
+    }
+
+    /// <summary>Gets the user-visible dialog title.</summary>
+    public string Title { get; }
+
+    /// <summary>Gets the user-visible result text.</summary>
+    public string Message { get; }
+
+    /// <summary>Gets whether the result should use an error icon.</summary>
+    public bool IsError { get; }
 }

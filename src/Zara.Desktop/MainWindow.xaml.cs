@@ -17,6 +17,7 @@ public partial class MainWindow : Window
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
         DataContext = _viewModel;
+        _viewModel.NotificationRequested += OnNotificationRequested;
         _reservationPresentationTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = TimeSpan.FromSeconds(10),
@@ -46,12 +47,21 @@ public partial class MainWindow : Window
     {
         _reservationPresentationTimer.Stop();
         _reservationPresentationTimer.Tick -= OnReservationPresentationTimerTick;
+        _viewModel.NotificationRequested -= OnNotificationRequested;
         _viewModel.Dispose();
         base.OnClosed(e);
     }
 
     private void OnReservationPresentationTimerTick(object? sender, EventArgs e) =>
         _viewModel.RefreshReservationPresentation();
+
+    private void OnNotificationRequested(
+        object? sender,
+        MainWindowNotificationEventArgs e) =>
+        ShowMessage(
+            e.Message,
+            e.IsError ? MessageBoxImage.Error : MessageBoxImage.Information,
+            e.Title);
 
     private async void AddReservation_Click(object sender, RoutedEventArgs e)
     {
@@ -151,11 +161,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ShowMessage(string message, MessageBoxImage image) =>
+    private void ShowMessage(
+        string message,
+        MessageBoxImage image,
+        string title = "시간 외 사용 예약") =>
         System.Windows.MessageBox.Show(
             this,
             message,
-            "시간 외 사용 예약",
+            title,
             MessageBoxButton.OK,
             image);
 }

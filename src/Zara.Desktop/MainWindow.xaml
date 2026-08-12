@@ -14,8 +14,6 @@
       <RowDefinition Height="Auto" />
       <RowDefinition Height="18" />
       <RowDefinition Height="*" />
-      <RowDefinition Height="12" />
-      <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
 
     <DockPanel LastChildFill="True">
@@ -116,16 +114,18 @@
                       <ComboBox Width="68"
                                 ItemsSource="{Binding StartTime.Meridiems}"
                                 SelectedItem="{Binding StartTime.Meridiem}" />
-                      <ComboBox Width="58"
-                                Margin="6,0,0,0"
-                                ItemsSource="{Binding StartTime.Hours}"
-                                SelectedItem="{Binding StartTime.Hour}" />
+                      <TextBox Width="48"
+                               Margin="6,0,0,0"
+                               MaxLength="2"
+                               HorizontalContentAlignment="Right"
+                               Text="{Binding StartTime.HourText, UpdateSourceTrigger=PropertyChanged}" />
                       <TextBlock Margin="5,0"
                                  VerticalAlignment="Center"
                                  Text=":" />
-                      <ComboBox Width="58"
-                                ItemsSource="{Binding StartTime.Minutes}"
-                                SelectedItem="{Binding StartTime.Minute}" />
+                      <TextBox Width="48"
+                               MaxLength="2"
+                               HorizontalContentAlignment="Right"
+                               Text="{Binding StartTime.MinuteText, UpdateSourceTrigger=PropertyChanged}" />
                     </StackPanel>
                   </DataTemplate>
                 </DataGridTemplateColumn.CellTemplate>
@@ -138,16 +138,18 @@
                       <ComboBox Width="68"
                                 ItemsSource="{Binding ReleaseTime.Meridiems}"
                                 SelectedItem="{Binding ReleaseTime.Meridiem}" />
-                      <ComboBox Width="58"
-                                Margin="6,0,0,0"
-                                ItemsSource="{Binding ReleaseTime.Hours}"
-                                SelectedItem="{Binding ReleaseTime.Hour}" />
+                      <TextBox Width="48"
+                               Margin="6,0,0,0"
+                               MaxLength="2"
+                               HorizontalContentAlignment="Right"
+                               Text="{Binding ReleaseTime.HourText, UpdateSourceTrigger=PropertyChanged}" />
                       <TextBlock Margin="5,0"
                                  VerticalAlignment="Center"
                                  Text=":" />
-                      <ComboBox Width="58"
-                                ItemsSource="{Binding ReleaseTime.Minutes}"
-                                SelectedItem="{Binding ReleaseTime.Minute}" />
+                      <TextBox Width="48"
+                               MaxLength="2"
+                               HorizontalContentAlignment="Right"
+                               Text="{Binding ReleaseTime.MinuteText, UpdateSourceTrigger=PropertyChanged}" />
                     </StackPanel>
                   </DataTemplate>
                 </DataGridTemplateColumn.CellTemplate>
@@ -171,8 +173,6 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="20" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="20" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
@@ -182,14 +182,9 @@
           </Grid.ColumnDefinitions>
 
           <TextBlock Grid.Row="0"
-                     Grid.ColumnSpan="2"
-                     Foreground="#FF5C6470"
-                     TextWrapping="Wrap"
-                     Text="긴급 해제는 절전, 최대 절전, 앱 다시 시작, Windows 다시 시작 때 끝납니다." />
-          <TextBlock Grid.Row="2"
                      VerticalAlignment="Center"
                      Text="긴급 해제 유지 시간" />
-          <StackPanel Grid.Row="2"
+          <StackPanel Grid.Row="0"
                       Grid.Column="1"
                       Orientation="Horizontal">
             <TextBox Width="100"
@@ -198,12 +193,12 @@
                      Text="{Binding EmergencyDurationMinutesText, UpdateSourceTrigger=PropertyChanged}" />
             <TextBlock Margin="8,0,0,0"
                        VerticalAlignment="Center"
-                       Text="분" />
+                       Text="분 (1~60분)" />
           </StackPanel>
-          <TextBlock Grid.Row="4"
+          <TextBlock Grid.Row="2"
                      VerticalAlignment="Center"
                      Text="긴급 해제 문장 수" />
-          <StackPanel Grid.Row="4"
+          <StackPanel Grid.Row="2"
                       Grid.Column="1"
                       Orientation="Horizontal">
             <TextBox Width="100"
@@ -212,9 +207,9 @@
                      Text="{Binding EmergencySentenceCountText, UpdateSourceTrigger=PropertyChanged}" />
             <TextBlock Margin="8,0,0,0"
                        VerticalAlignment="Center"
-                       Text="개 (0개면 문장 입력 없이 해제)" />
+                       Text="개 (0~99개, 0개면 문장 입력 없이 해제)" />
           </StackPanel>
-          <Button Grid.Row="6"
+          <Button Grid.Row="4"
                   Grid.ColumnSpan="2"
                   Width="128"
                   Height="36"
@@ -233,9 +228,6 @@
             <RowDefinition Height="*" />
           </Grid.RowDefinitions>
           <DockPanel LastChildFill="True">
-            <TextBlock VerticalAlignment="Center"
-                       Foreground="#FF5C6470"
-                       Text="목록 머리글을 누르면 정렬 기준을 바꿀 수 있습니다. 지난 날짜의 예약은 옅게 표시됩니다." />
             <Button Width="112"
                     Height="32"
                     Margin="16,0,0,0"
@@ -301,13 +293,5 @@
       </TabItem>
     </TabControl>
 
-    <Border Grid.Row="4"
-            Padding="12,8"
-            Background="#FFE9EDF2"
-            CornerRadius="6">
-      <TextBlock Foreground="#FF38424F"
-                 Text="{Binding OperationMessage}"
-                 TextWrapping="Wrap" />
-    </Border>
   </Grid>
 </Window>
