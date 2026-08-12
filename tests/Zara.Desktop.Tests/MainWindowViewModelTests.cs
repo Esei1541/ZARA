@@ -111,6 +111,38 @@ public sealed class MainWindowViewModelTests
     }
 
     [STATestMethod]
+    public async Task SavingEveryWeekdayAsDisabledRemovesTheNextLockCountdown()
+    {
+        var timeProvider = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 12, 23, 30, 0, TimeSpan.Zero));
+        var store = new RecordingStore(new UsagePolicySettings(
+            WeeklyUsageRestrictionSchedule.Default.WithRestriction(
+                DayOfWeek.Wednesday,
+                new DailyUsageRestriction(
+                    isEnabled: true,
+                    startTime: new TimeOnly(0, 0),
+                    releaseTime: new TimeOnly(23, 28))),
+            EmergencyUnlockSettings.Default,
+            Array.Empty<OutOfHoursReservation>()));
+        using var runtime = CreateRuntime(store, timeProvider);
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        Assert.StartsWith("다음 잠금까지 ", viewModel.UsagePolicyStatusMessage);
+
+        foreach (DailyUsageRestrictionViewModel weekday in viewModel.WeekdayRestrictions)
+        {
+            weekday.IsRestrictionEnabled = false;
+        }
+
+        await viewModel.SaveUsagePolicySettingsAsync();
+
+        Assert.IsTrue(AllWeekdaysAreDisabled(store.Settings.WeeklySchedule));
+        Assert.AreEqual(
+            "지금은 설정된 사용 금지 시각이 없습니다.",
+            viewModel.UsagePolicyStatusMessage);
+    }
+
+    [STATestMethod]
     public async Task ReservationPresentationUsesTheRuntimeEvaluationTime()
     {
         var timeProvider = new ManualTimeProvider(
@@ -177,7 +209,7 @@ public sealed class MainWindowViewModelTests
         using var viewModel = CreateViewModel(runtime);
         DailyUsageRestrictionViewModel monday = viewModel.WeekdayRestrictions.Single(
             day => day.DayOfWeek == DayOfWeek.Monday);
-        monday.IsEnabled = true;
+        monday.IsRestrictionEnabled = true;
         monday.StartTime.Set(new TimeOnly(8, 0));
         monday.ReleaseTime.Set(new TimeOnly(9, 0));
         lockPort.FailWhenLocking = true;
@@ -239,7 +271,7 @@ public sealed class MainWindowViewModelTests
         using var viewModel = CreateViewModel(runtime);
         DailyUsageRestrictionViewModel monday = viewModel.WeekdayRestrictions.Single(
             day => day.DayOfWeek == DayOfWeek.Monday);
-        monday.IsEnabled = true;
+        monday.IsRestrictionEnabled = true;
         var notificationSource = new TaskCompletionSource<MainWindowNotificationEventArgs>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         viewModel.NotificationRequested += (_, notification) =>
@@ -277,6 +309,19 @@ public sealed class MainWindowViewModelTests
                 new DailyUsageRestriction(true, start, release)),
             EmergencyUnlockSettings.Default,
             Array.Empty<OutOfHoursReservation>());
+
+    private static bool AllWeekdaysAreDisabled(WeeklyUsageRestrictionSchedule schedule)
+    {
+        for (int dayValue = 0; dayValue < 7; dayValue++)
+        {
+            if (schedule.GetRestriction((DayOfWeek)dayValue).IsEnabled)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private sealed class RecordingStore : IUsagePolicySettingsStore
     {

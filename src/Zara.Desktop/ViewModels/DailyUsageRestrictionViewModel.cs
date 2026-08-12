@@ -9,7 +9,7 @@ namespace Zara.Desktop.ViewModels;
 /// </summary>
 internal sealed class DailyUsageRestrictionViewModel : INotifyPropertyChanged
 {
-    private bool _isEnabled;
+    private bool _isRestrictionEnabled;
 
     /// <summary>Creates a weekday editor with the supplied display name.</summary>
     public DailyUsageRestrictionViewModel(DayOfWeek dayOfWeek, string displayName)
@@ -29,17 +29,17 @@ internal sealed class DailyUsageRestrictionViewModel : INotifyPropertyChanged
     public string DisplayName { get; }
 
     /// <summary>Gets or sets whether the weekday rule is enabled.</summary>
-    public bool IsEnabled
+    public bool IsRestrictionEnabled
     {
-        get => _isEnabled;
+        get => _isRestrictionEnabled;
         set
         {
-            if (_isEnabled == value)
+            if (_isRestrictionEnabled == value)
             {
                 return;
             }
 
-            _isEnabled = value;
+            _isRestrictionEnabled = value;
             OnPropertyChanged();
         }
     }
@@ -58,20 +58,20 @@ internal sealed class DailyUsageRestrictionViewModel : INotifyPropertyChanged
     {
         TimeOnly startTime = StartTime.ToTimeOnly($"{DisplayName} 시작 시각");
         TimeOnly releaseTime = ReleaseTime.ToTimeOnly($"{DisplayName} 해제 시각");
-        if (IsEnabled && startTime == releaseTime)
+        if (IsRestrictionEnabled && startTime == releaseTime)
         {
             throw new ArgumentException(
                 $"{DisplayName}의 시작 시각과 해제 시각은 다르게 입력하세요.");
         }
 
-        return new DailyUsageRestriction(IsEnabled, startTime, releaseTime);
+        return new DailyUsageRestriction(IsRestrictionEnabled, startTime, releaseTime);
     }
 
     /// <summary>Updates this editor from a persisted Core rule.</summary>
     public void Load(DailyUsageRestriction restriction)
     {
         ArgumentNullException.ThrowIfNull(restriction);
-        IsEnabled = restriction.IsEnabled;
+        IsRestrictionEnabled = restriction.IsEnabled;
         StartTime.Set(restriction.StartTime);
         ReleaseTime.Set(restriction.ReleaseTime);
     }
