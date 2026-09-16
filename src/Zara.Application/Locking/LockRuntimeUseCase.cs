@@ -4,8 +4,8 @@ using Zara.Core.Runtime;
 namespace Zara.Application.Locking;
 
 /// <summary>
-/// Serializes runtime requests, executes reducer effects through an overlay port, and feeds every
-/// adapter result back into the reducer.
+/// Serializes runtime requests, coordinates overlay and input adapters, and feeds every adapter
+/// result back into the reducer. Visible/hidden confirmation includes the associated input effect.
 /// </summary>
 /// <remarks>
 /// Adapter failures and cancellations are recorded as an unknown projection and then propagated to
@@ -14,6 +14,7 @@ namespace Zara.Application.Locking;
 public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
 {
     private readonly ILockOverlayPort _overlayPort;
+    private readonly ILockInputPort _inputPort;
     private readonly SemaphoreSlim _requestGate = new(1, 1);
     private RuntimeSnapshot _currentSnapshot = new(
         RuntimeState.Initial,
@@ -25,10 +26,13 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
     /// Initializes a lock runtime using the supplied overlay projection.
     /// </summary>
     /// <param name="overlayPort">The adapter that owns overlay windows and topology reconciliation.</param>
-    public LockRuntimeUseCase(ILockOverlayPort overlayPort)
+    /// <param name="inputPort">The adapter that restricts shell shortcuts while locked.</param>
+    public LockRuntimeUseCase(ILockOverlayPort overlayPort, ILockInputPort inputPort)
     {
         ArgumentNullException.ThrowIfNull(overlayPort);
+        ArgumentNullException.ThrowIfNull(inputPort);
         _overlayPort = overlayPort;
+        _inputPort = inputPort;
     }
 
     /// <inheritdoc />
@@ -211,12 +215,23 @@ public sealed class LockRuntimeUseCase : ILockRuntimeUseCase, IDisposable
         firstFailure?.Throw();
     }
 
-    private Task ApplyOverlayEffectAsync(
+    private async Task ApplyOverlayEffectAsync(
         ApplyOverlayVisibility effect,
-        CancellationToken cancellationToken) =>
-        effect.Visibility == OverlayVisibility.Visible
-            ? _overlayPort.ShowAllAsync(cancellationToken)
-            : _overlayPort.HideAllAsync(cancellationToken);
+        CancellationToken cancellationToken)
+    {
+        if (effect.Visibility == OverlayVisibility.Visible)
+        {
+            // Never restrict input before the user has an overlay with an unlock control.
+            await _overlayPort.ShowAllAsync(cancellationToken).ConfigureAwait(false);
+            await _inputPort.EnableAsync(cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            // Restore input even if subsequent window cleanup fails.
+            await _inputPort.DisableAsync(cancellationToken).ConfigureAwait(false);
+            await _overlayPort.HideAllAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
 
     private void ThrowIfDisposed() =>
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);

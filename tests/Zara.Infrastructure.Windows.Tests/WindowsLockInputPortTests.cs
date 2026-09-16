@@ -1,0 +1,169 @@
+namespace Zara.Infrastructure.Windows.Tests;
+
+[TestClass]
+public sealed class WindowsLockInputPortTests
+{
+    [TestMethod]
+    public async Task UnlockedAdapterCreatesNoHookAndRepeatedLockUsesOneHook()
+    {
+        var hooks = new List<RecordingHook>();
+        using var port = new WindowsLockInputPort(() =>
+        {
+            var hook = new RecordingHook();
+            hooks.Add(hook);
+            return hook;
+        });
+
+        await port.DisableAsync(CancellationToken.None);
+        Assert.IsEmpty(hooks);
+        await port.EnableAsync(CancellationToken.None);
+        await port.EnableAsync(CancellationToken.None);
+        Assert.HasCount(1, hooks);
+        Assert.AreEqual(1, hooks[0].Starts);
+
+        await port.DisableAsync(CancellationToken.None);
+        await port.DisableAsync(CancellationToken.None);
+        Assert.AreEqual(1, hooks[0].Stops);
+        await port.EnableAsync(CancellationToken.None);
+        Assert.HasCount(2, hooks);
+    }
+
+    [TestMethod]
+    public async Task UnlockWaitsForStartupAndForHookCleanup()
+    {
+        var hook = new RecordingHook { CompleteStart = false, CompleteStop = false };
+        using var port = new WindowsLockInputPort(() => hook);
+        Task locking = port.EnableAsync(CancellationToken.None);
+        Task unlocking = port.DisableAsync(CancellationToken.None);
+        Assert.IsFalse(locking.IsCompleted);
+        Assert.IsFalse(unlocking.IsCompleted);
+        Assert.AreEqual(0, hook.Stops);
+
+        hook.StartedSource.SetResult();
+        await locking;
+        await hook.StopRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsFalse(unlocking.IsCompleted);
+        hook.StoppedSource.SetResult();
+        await unlocking;
+    }
+
+    [TestMethod]
+    public async Task CancelledLockDoesNotStartHook()
+    {
+        var hook = new RecordingHook();
+        using var port = new WindowsLockInputPort(() => hook);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => port.EnableAsync(cancellation.Token));
+
+        Assert.AreEqual(0, hook.Starts);
+    }
+
+    [TestMethod]
+    public async Task CancellationAfterStartingDoesNotOrphanHook()
+    {
+        var hook = new RecordingHook { CompleteStart = false };
+        using var port = new WindowsLockInputPort(() => hook);
+        using var cancellation = new CancellationTokenSource();
+        Task locking = port.EnableAsync(cancellation.Token);
+
+        cancellation.Cancel();
+        Assert.IsFalse(locking.IsCompleted);
+        hook.StartedSource.SetResult();
+        await locking;
+        await port.DisableAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, hook.Stops);
+        Assert.IsTrue(hook.Stopped.IsCompletedSuccessfully);
+    }
+
+    [TestMethod]
+    public async Task StartupFailureLeavesUnlockAvailableAndAllowsRetry()
+    {
+        var failed = new RecordingHook { CompleteStart = false };
+        failed.StartedSource.SetException(new InvalidOperationException("Install failed."));
+        failed.StoppedSource.SetResult();
+        var replacement = new RecordingHook();
+        int created = 0;
+        using var port = new WindowsLockInputPort(() => created++ == 0 ? failed : replacement);
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => port.EnableAsync(CancellationToken.None));
+        await port.DisableAsync(CancellationToken.None);
+        await port.EnableAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, replacement.Starts);
+    }
+
+    [TestMethod]
+    public async Task StopFailureMustBeRetriedBeforeRelocking()
+    {
+        var first = new RecordingHook { FailStop = true };
+        var replacement = new RecordingHook();
+        int created = 0;
+        using var port = new WindowsLockInputPort(() => created++ == 0 ? first : replacement);
+        await port.EnableAsync(CancellationToken.None);
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => port.DisableAsync(CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => port.EnableAsync(CancellationToken.None));
+        Assert.AreEqual(0, replacement.Starts);
+
+        first.FailStop = false;
+        await port.EnableAsync(CancellationToken.None);
+        Assert.AreEqual(1, replacement.Starts);
+        Assert.IsTrue(first.Stopped.IsCompletedSuccessfully);
+    }
+
+    [TestMethod]
+    public async Task DisposeRestoresInputAndPreventsLaterEnable()
+    {
+        var hook = new RecordingHook();
+        var port = new WindowsLockInputPort(() => hook);
+        await port.EnableAsync(CancellationToken.None);
+
+        port.Dispose();
+        port.Dispose();
+
+        Assert.AreEqual(1, hook.Stops);
+        Assert.IsTrue(hook.Stopped.IsCompletedSuccessfully);
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => port.EnableAsync(CancellationToken.None));
+    }
+
+    private sealed class RecordingHook : IShellShortcutHook
+    {
+        internal TaskCompletionSource StartedSource { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource StoppedSource { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource StopRequested { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal bool CompleteStart { get; init; } = true;
+        internal bool CompleteStop { get; init; } = true;
+        internal bool FailStop { get; set; }
+        internal int Starts { get; private set; }
+        internal int Stops { get; private set; }
+        public Task Started => StartedSource.Task;
+        public Task Stopped => StoppedSource.Task;
+
+        public void Start()
+        {
+            Starts++;
+            if (CompleteStart)
+            {
+                StartedSource.TrySetResult();
+            }
+        }
+
+        public void Stop()
+        {
+            Stops++;
+            StopRequested.TrySetResult();
+            if (FailStop)
+            {
+                throw new InvalidOperationException("Stop failed.");
+            }
+
+            if (CompleteStop)
+            {
+                StoppedSource.TrySetResult();
+            }
+        }
+    }
+}

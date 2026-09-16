@@ -35,6 +35,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private Icon? _applicationIcon;
     private WindowsDisplayTopology? _displayTopology;
     private WpfLockOverlayPort? _overlayPort;
+    private WindowsLockInputPort? _lockInputPort;
     private LockRuntimeUseCase? _lockRuntime;
     private SystemShutdownUseCase? _systemShutdown;
     private ShutdownCancellationWatchdog? _shutdownCancellationWatchdog;
@@ -171,7 +172,8 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             _displayTopology,
             new NativeWindowPositioner(),
             ShowDevelopmentSafetyControls);
-        _lockRuntime = new LockRuntimeUseCase(_overlayPort);
+        _lockInputPort = new WindowsLockInputPort();
+        _lockRuntime = new LockRuntimeUseCase(_overlayPort, _lockInputPort);
         _systemShutdown = new SystemShutdownUseCase(
             _lockRuntime,
             new WindowsSystemShutdownPort());
@@ -897,6 +899,9 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
 
         CancelSystemShutdownWatchdog();
         UnsubscribeUsagePolicyNotifications();
+
+        _lockInputPort?.Dispose();
+        _lockInputPort = null;
 
         if (_emergencyUnlockWindow is not null)
         {
