@@ -143,6 +143,52 @@ public sealed class MainWindowViewModelTests
     }
 
     [STATestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task DevelopmentResetUnchecksTheWeekdaysAndReenablesSettings(bool restrictionEnabled)
+    {
+        var settings = SettingsWithMondayRestriction(new TimeOnly(9, 0), new TimeOnly(10, 0))
+            .WithEmergencyUnlock(new EmergencyUnlockSettings(17, 0));
+        if (!restrictionEnabled)
+        {
+            settings = settings.WithWeeklySchedule(settings.WeeklySchedule.WithRestriction(
+                DayOfWeek.Monday,
+                new DailyUsageRestriction(false, new TimeOnly(9, 0), new TimeOnly(10, 0))));
+        }
+
+        using var runtime = CreateRuntime(
+            new RecordingStore(settings),
+            new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 9, 30, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        if (restrictionEnabled)
+        {
+            await runtime.StartEmergencyUnlockAsync();
+        }
+
+        using var viewModel = CreateViewModel(runtime);
+        Assert.AreEqual(!restrictionEnabled, viewModel.CanChangeUsagePolicySettings);
+        if (!restrictionEnabled)
+        {
+            viewModel.WeekdayRestrictions.Single(day => day.DayOfWeek == DayOfWeek.Monday)
+                .IsRestrictionEnabled = true;
+        }
+
+        await runtime.DisableWeeklyScheduleForDevelopmentAsync();
+        viewModel.ResetWeeklyScheduleEdits();
+
+        Assert.IsTrue(viewModel.WeekdayRestrictions.All(day => !day.IsRestrictionEnabled));
+        DailyUsageRestrictionViewModel monday = viewModel.WeekdayRestrictions.Single(
+            day => day.DayOfWeek == DayOfWeek.Monday);
+        Assert.AreEqual("9", monday.StartTime.HourText);
+        Assert.AreEqual("10", monday.ReleaseTime.HourText);
+        Assert.AreEqual("17", viewModel.EmergencyDurationMinutesText);
+        Assert.IsTrue(viewModel.CanChangeSettings);
+        Assert.IsTrue(viewModel.SaveWeeklyScheduleCommand.CanExecute(parameter: null));
+        Assert.IsTrue(viewModel.SaveEmergencyUnlockSettingsCommand.CanExecute(parameter: null));
+        Assert.IsTrue(viewModel.ToggleRestartSettingCommand.CanExecute(parameter: null));
+    }
+
+    [STATestMethod]
     public async Task ReservationPresentationUsesTheRuntimeEvaluationTime()
     {
         var timeProvider = new ManualTimeProvider(
@@ -243,7 +289,8 @@ public sealed class MainWindowViewModelTests
             runtime,
             restartOnExitWhenUnlocked: true,
             updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.FromException(new InvalidOperationException("Failed.")));
+            requestLock: () => Task.FromException(new InvalidOperationException("Failed.")),
+            requestDevelopmentUnlock: () => Task.CompletedTask);
         var notificationSource = new TaskCompletionSource<MainWindowNotificationEventArgs>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         viewModel.NotificationRequested += (_, notification) =>
@@ -384,7 +431,8 @@ public sealed class MainWindowViewModelTests
             runtime,
             restartOnExitWhenUnlocked: true,
             updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.CompletedTask);
+            requestLock: () => Task.CompletedTask,
+            requestDevelopmentUnlock: () => Task.CompletedTask);
 
     private static UsagePolicyRuntime CreateRuntime(
         RecordingStore store,

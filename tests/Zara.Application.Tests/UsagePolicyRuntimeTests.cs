@@ -389,6 +389,114 @@ public sealed class UsagePolicyRuntimeTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task DevelopmentResetDisablesEveryWeekdayAndAllowsEditingDuringABan(
+        bool emergencyUnlockActive)
+    {
+        var timeProvider = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero));
+        WeeklyUsageRestrictionSchedule schedule = WeeklyUsageRestrictionSchedule.Default;
+        foreach (DayOfWeek day in Enum.GetValues<DayOfWeek>())
+        {
+            schedule = schedule.WithRestriction(
+                day,
+                new DailyUsageRestriction(true, new TimeOnly(21, (int)day), new TimeOnly(7, (int)day)));
+        }
+
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 9, 10), new TimeOnly(13, 0), new TimeOnly(14, 0), "보존 대상");
+        var settings = new UsagePolicySettings(
+            schedule, new EmergencyUnlockSettings(durationMinutes: 17, sentenceCount: 0), [reservation]);
+        var store = new RecordingStore(settings);
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), timeProvider);
+        await runtime.InitializeAsync();
+        if (emergencyUnlockActive)
+        {
+            await runtime.StartEmergencyUnlockAsync();
+        }
+
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.IsSettingsChangeAllowed);
+
+        await runtime.DisableWeeklyScheduleForDevelopmentAsync();
+
+        Assert.AreEqual(1, store.SaveCount);
+        foreach (DayOfWeek day in Enum.GetValues<DayOfWeek>())
+        {
+            DailyUsageRestriction persisted = store.Settings.WeeklySchedule.GetRestriction(day);
+            Assert.IsFalse(persisted.IsEnabled);
+            Assert.AreEqual(schedule.GetRestriction(day).StartTime, persisted.StartTime);
+            Assert.AreEqual(schedule.GetRestriction(day).ReleaseTime, persisted.ReleaseTime);
+        }
+
+        Assert.AreEqual(settings.EmergencyUnlock, store.Settings.EmergencyUnlock);
+        CollectionAssert.AreEqual(settings.Reservations, store.Settings.Reservations);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.IsSettingsChangeAllowed);
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        Assert.AreEqual(emergencyUnlockActive, runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
+        CollectionAssert.AreEqual(ExpectedLockThenUnlockRequirements, lockPort.AppliedRequirements);
+
+        await runtime.UpdateEmergencyUnlockSettingsAsync(new EmergencyUnlockSettings(18, 0));
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 11, 22, 0, 0, TimeSpan.Zero));
+        timeProvider.AdvanceMonotonic(TimeSpan.FromDays(1));
+        await runtime.RefreshAsync();
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
+
+        var restartedLockPort = new RecordingLockPort();
+        using var restarted = CreateRuntime(store, restartedLockPort, new RecordingPromptCatalog(), timeProvider);
+        await restarted.InitializeAsync();
+        Assert.IsTrue(restarted.CurrentSnapshot.Evaluation.IsSettingsChangeAllowed);
+        Assert.IsFalse(restartedLockPort.AppliedRequirements.Single());
+    }
+
+    [TestMethod]
+    public async Task FailedDevelopmentResetSaveKeepsThePersistedScheduleAndReportsFailure()
+    {
+        var settings = CreateSettings(DayOfWeek.Monday, new TimeOnly(21, 0), new TimeOnly(7, 0));
+        var store = new RecordingStore(settings) { SaveException = new IOException("Disk unavailable.") };
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(
+            store,
+            lockPort,
+            new RecordingPromptCatalog(),
+            new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+
+        await Assert.ThrowsExactlyAsync<IOException>(
+            () => runtime.DisableWeeklyScheduleForDevelopmentAsync());
+
+        Assert.AreEqual(settings, store.Settings);
+        Assert.AreEqual(settings, runtime.CurrentSnapshot.Settings);
+        CollectionAssert.AreEqual(ExpectedInitialLockRequirement, lockPort.AppliedRequirements);
+    }
+
+    [TestMethod]
+    public async Task FailedUnlockAfterDevelopmentResetRetainsDisabledScheduleAndRetries()
+    {
+        var store = new RecordingStore(
+            CreateSettings(DayOfWeek.Monday, new TimeOnly(21, 0), new TimeOnly(7, 0)));
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(
+            store,
+            lockPort,
+            new RecordingPromptCatalog(),
+            new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        lockPort.FailWhenUnlocking = true;
+
+        await Assert.ThrowsExactlyAsync<UsagePolicySettingsSavedButApplyFailedException>(
+            () => runtime.DisableWeeklyScheduleForDevelopmentAsync());
+
+        Assert.IsFalse(store.Settings.WeeklySchedule.Monday.IsEnabled);
+        Assert.AreEqual(store.Settings, runtime.CurrentSnapshot.Settings);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.IsSettingsChangeAllowed);
+        lockPort.FailWhenUnlocking = false;
+        await runtime.RefreshAsync();
+        Assert.IsFalse(lockPort.AppliedRequirements.Last());
+    }
+
+    [TestMethod]
     public async Task ConcurrentTabSavesPreserveBothLatestChanges()
     {
         var store = new RecordingStore(UsagePolicySettings.Default);
@@ -531,12 +639,14 @@ public sealed class UsagePolicyRuntimeTests
 
         public bool FailWhenLocking { get; set; }
 
+        public bool FailWhenUnlocking { get; set; }
+
         public Task ApplyPolicyLockRequirementAsync(
             bool lockRequired,
             CancellationToken cancellationToken = default)
         {
             AppliedRequirements.Add(lockRequired);
-            if (lockRequired && FailWhenLocking)
+            if ((lockRequired && FailWhenLocking) || (!lockRequired && FailWhenUnlocking))
             {
                 return Task.FromException(new InvalidOperationException("The lock could not be applied."));
             }

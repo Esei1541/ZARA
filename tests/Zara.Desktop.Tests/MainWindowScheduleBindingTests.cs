@@ -15,7 +15,8 @@ public sealed class MainWindowScheduleBindingTests
         var viewModel = new MainWindowViewModel(
             restartOnExitWhenUnlocked: true,
             updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.CompletedTask);
+            requestLock: () => Task.CompletedTask,
+            requestDevelopmentUnlock: () => Task.CompletedTask);
         DailyUsageRestrictionViewModel wednesday = viewModel.WeekdayRestrictions.Single(
             day => day.DayOfWeek == DayOfWeek.Wednesday);
         wednesday.IsRestrictionEnabled = true;
@@ -127,7 +128,8 @@ public sealed class MainWindowScheduleBindingTests
             runtime,
             restartOnExitWhenUnlocked: true,
             updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.CompletedTask);
+            requestLock: () => Task.CompletedTask,
+            requestDevelopmentUnlock: () => Task.CompletedTask);
 
     private static UsagePolicyRuntime CreateRuntime(UsagePolicySettings settings) =>
         new(
