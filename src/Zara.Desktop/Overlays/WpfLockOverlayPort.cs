@@ -216,7 +216,12 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
             RequestSystemShutdownAsync,
             RequestEmergencyUnlockAsync,
             RequestDevelopmentUnlockAsync,
-            _showDevelopmentSafetyControls);
+            _showDevelopmentSafetyControls)
+        {
+            // Direct ordinary typing to the first lock surface, not the previously active app.
+            // Additional monitors must not take focus from an open emergency-unlock dialog.
+            ShowActivated = _windows.Count == 0,
+        };
         window.SetEmergencyUnlockEnabled(_emergencyUnlockEnabled);
         window.DpiChanged += (_, _) => ScheduleReconcile();
         window.Loaded += (_, _) => ScheduleReconcile();

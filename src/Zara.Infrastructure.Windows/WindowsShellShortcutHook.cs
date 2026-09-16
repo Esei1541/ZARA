@@ -16,12 +16,19 @@ internal sealed partial class WindowsShellShortcutHook : IShellShortcutHook
     private const uint WmSysKeyDown = 0x0104;
     private const uint WmSysKeyUp = 0x0105;
     private const int VkControl = 0x11;
+    private const int VkShift = 0x10;
+    private const int VkLeftWindows = 0x5B;
+    private const int VkRightWindows = 0x5C;
+    private const uint LlkhfAltDown = 0x20;
+    private const uint EventSystemDesktopSwitch = 0x0020;
+    private const uint WinEventOutOfContext = 0;
 
     private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _stopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly ShellShortcutKeyState _keys = new();
     private readonly Thread _thread;
     private readonly HookProcedure _callback;
+    private readonly WinEventProcedure _desktopSwitchCallback;
     private uint _threadId;
     private int _enabled;
     private int _finished;
@@ -29,6 +36,7 @@ internal sealed partial class WindowsShellShortcutHook : IShellShortcutHook
     internal WindowsShellShortcutHook()
     {
         _callback = HookCallback;
+        _desktopSwitchCallback = OnDesktopSwitch;
         _thread = new Thread(Run)
         {
             IsBackground = true,
@@ -61,6 +69,7 @@ internal sealed partial class WindowsShellShortcutHook : IShellShortcutHook
     private void Run()
     {
         SafeHookHandle? hook = null;
+        SafeWinEventHookHandle? desktopSwitchHook = null;
         Exception? failure = null;
         try
         {
@@ -73,6 +82,15 @@ internal sealed partial class WindowsShellShortcutHook : IShellShortcutHook
                 throw new Win32Exception(Marshal.GetLastPInvokeError(), "Could not identify the hook module.");
             }
 
+            nint desktopSwitchHandle = SetWinEventHook(
+                EventSystemDesktopSwitch, EventSystemDesktopSwitch, 0,
+                Marshal.GetFunctionPointerForDelegate(_desktopSwitchCallback), 0, 0, WinEventOutOfContext);
+            if (desktopSwitchHandle == 0)
+            {
+                throw new InvalidOperationException("Could not observe desktop switches for the keyboard hook.");
+            }
+
+            desktopSwitchHook = new SafeWinEventHookHandle(desktopSwitchHandle);
             nint handle = SetWindowsHookExW(
                 WhKeyboardLl, Marshal.GetFunctionPointerForDelegate(_callback), module, 0);
             if (handle == 0)
@@ -81,6 +99,7 @@ internal sealed partial class WindowsShellShortcutHook : IShellShortcutHook
             }
 
             hook = new SafeHookHandle(handle);
+            ResetKeyState();
             Volatile.Write(ref _enabled, 1);
             _started.TrySetResult();
 
@@ -116,8 +135,15 @@ internal sealed partial class WindowsShellShortcutHook : IShellShortcutHook
                 failure ??= new Win32Exception(hook.ReleaseError, "Could not remove the keyboard hook.");
             }
 
+            desktopSwitchHook?.Dispose();
+            if (desktopSwitchHook is { ReleaseFailed: true })
+            {
+                failure ??= new InvalidOperationException("Could not remove the desktop-switch event hook.");
+            }
+
             // Keep the native callback rooted until unhooking on its owning thread is complete.
             GC.KeepAlive(_callback);
+            GC.KeepAlive(_desktopSwitchCallback);
             Volatile.Write(ref _finished, 1);
             if (failure is null)
             {
@@ -126,7 +152,7 @@ internal sealed partial class WindowsShellShortcutHook : IShellShortcutHook
             else
             {
                 bool startupFailed = _started.TrySetException(failure);
-                if (startupFailed && hook is null)
+                if (startupFailed && hook is null && desktopSwitchHook is not { ReleaseFailed: true })
                 {
                     // Installation failed without acquiring a hook; there is nothing to restore.
                     _stopped.TrySetResult();
@@ -144,11 +170,14 @@ internal sealed partial class WindowsShellShortcutHook : IShellShortcutHook
         if (code == 0 && Volatile.Read(ref _enabled) != 0 &&
             message is WmKeyDown or WmKeyUp or WmSysKeyDown or WmSysKeyUp)
         {
-            uint virtualKey = ((KeyboardData*)data)->VirtualKey;
+            KeyboardData keyboard = *(KeyboardData*)data;
+            uint virtualKey = keyboard.VirtualKey;
             bool keyUp = message is WmKeyUp or WmSysKeyUp;
             bool controlDown = virtualKey == 0x1B && !keyUp &&
                 (GetAsyncKeyState(VkControl) & 0x8000) != 0;
-            if (_keys.ShouldSuppress(virtualKey, keyUp, controlDown))
+            bool shiftDown = controlDown && (GetAsyncKeyState(VkShift) & 0x8000) != 0;
+            bool altDown = (keyboard.Flags & LlkhfAltDown) != 0;
+            if (_keys.ShouldSuppress(virtualKey, keyUp, controlDown, altDown, shiftDown))
             {
                 return 1;
             }
@@ -156,6 +185,25 @@ internal sealed partial class WindowsShellShortcutHook : IShellShortcutHook
 
         return CallNextHookEx(0, code, message, data);
     }
+
+    private void OnDesktopSwitch(
+        nint hook, uint eventType, nint window, int objectId, int childId, uint eventThread, uint eventTime)
+    {
+        if (eventType == EventSystemDesktopSwitch)
+        {
+            // Out-of-context WinEvents run on this same message-loop thread. Key releases on
+            // the secure desktop are invisible to our keyboard hook, so discard all old pairs.
+            ResetKeyState();
+        }
+    }
+
+    private void ResetKeyState() => _keys.Reset(
+        leftWindowsDown: (GetAsyncKeyState(VkLeftWindows) & 0x8000) != 0,
+        rightWindowsDown: (GetAsyncKeyState(VkRightWindows) & 0x8000) != 0);
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate void WinEventProcedure(
+        nint hook, uint eventType, nint window, int objectId, int childId, uint eventThread, uint eventTime);
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate nint HookProcedure(int code, nuint message, nint data);
@@ -182,6 +230,26 @@ internal sealed partial class WindowsShellShortcutHook : IShellShortcutHook
         internal int Y;
         internal uint Private;
     }
+
+    private sealed class SafeWinEventHookHandle : SafeHandleZeroOrMinusOneIsInvalid
+    {
+        internal SafeWinEventHookHandle(nint hook) : base(ownsHandle: true) => SetHandle(hook);
+
+        internal bool ReleaseFailed { get; private set; }
+
+        protected override bool ReleaseHandle()
+        {
+            ReleaseFailed = UnhookWinEvent(handle) == 0;
+            return !ReleaseFailed;
+        }
+    }
+
+    [LibraryImport("user32.dll")]
+    private static partial nint SetWinEventHook(
+        uint eventMin, uint eventMax, nint module, nint callback, uint processId, uint threadId, uint flags);
+
+    [LibraryImport("user32.dll")]
+    private static partial int UnhookWinEvent(nint hook);
 
     private sealed class SafeHookHandle : SafeHandleZeroOrMinusOneIsInvalid
     {
