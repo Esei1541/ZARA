@@ -11,7 +11,6 @@ internal sealed class ReservationRowViewModel : INotifyPropertyChanged
 {
     private bool _isExpired;
     private bool _isActive;
-    private bool _isSettingsChangeAllowed;
 
     /// <summary>Creates a row for the supplied persisted reservation.</summary>
     public ReservationRowViewModel(OutOfHoursReservation reservation)
@@ -49,31 +48,21 @@ internal sealed class ReservationRowViewModel : INotifyPropertyChanged
         {
             if (SetField(ref _isActive, value))
             {
-                OnPropertyChanged(nameof(CanDelete));
                 OnPropertyChanged(nameof(ActiveStatusText));
             }
         }
     }
 
-    /// <summary>Gets whether the delete action may be enabled for this row.</summary>
-    public bool CanDelete => _isSettingsChangeAllowed && !IsActive;
-
     /// <summary>Gets the Korean status label displayed in the reservation list.</summary>
     public string ActiveStatusText => IsActive ? "적용 중" : "대기";
 
-    /// <summary>Refreshes UI-only appearance and button state from the supplied local time.</summary>
-    public void UpdatePresentation(DateTime localNow, bool isSettingsChangeAllowed)
+    /// <summary>Refreshes UI-only appearance from the supplied local time.</summary>
+    public void UpdatePresentation(DateTime localNow)
     {
         DateOnly localDate = DateOnly.FromDateTime(localNow);
         TimeOnly localTime = TimeOnly.FromDateTime(localNow);
         IsExpired = Date < localDate;
         IsActive = Date == localDate && StartTime <= localTime && localTime < EndTime;
-
-        if (_isSettingsChangeAllowed != isSettingsChangeAllowed)
-        {
-            _isSettingsChangeAllowed = isSettingsChangeAllowed;
-            OnPropertyChanged(nameof(CanDelete));
-        }
     }
 
     private bool SetField<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

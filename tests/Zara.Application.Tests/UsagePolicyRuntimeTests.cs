@@ -263,7 +263,204 @@ public sealed class UsagePolicyRuntimeTests
                 WeeklyUsageRestrictionSchedule.Default,
                 EmergencyUnlockSettings.Default));
         await Assert.ThrowsExactlyAsync<UsagePolicySettingsLockedException>(
+            () => runtime.UpdateWeeklyScheduleAsync(WeeklyUsageRestrictionSchedule.Default));
+        await Assert.ThrowsExactlyAsync<UsagePolicySettingsLockedException>(
+            () => runtime.UpdateEmergencyUnlockSettingsAsync(new EmergencyUnlockSettings(15, 0)));
+        await Assert.ThrowsExactlyAsync<UsagePolicySettingsLockedException>(
+            () => runtime.AddReservationAsync(new OutOfHoursReservation(
+                Guid.NewGuid(), new DateOnly(2026, 8, 11), new TimeOnly(10, 0), new TimeOnly(11, 0), "추가")));
+        Assert.AreEqual(0, store.SaveCount);
+    }
+
+    [TestMethod]
+    [DataRow(12, false, false)]
+    [DataRow(22, false, true)]
+    [DataRow(22, true, false)]
+    public async Task RemovingActiveReservationPersistsAndImmediatelyReevaluatesLock(
+        int hour,
+        bool emergencyUnlockActive,
+        bool expectedLock)
+    {
+        var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, hour, 30, 0, TimeSpan.Zero));
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 10), new TimeOnly(hour, 0), new TimeOnly(hour + 1, 0), "종료");
+        var future = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 11), new TimeOnly(10, 0), new TimeOnly(11, 0), "유지");
+        var settings = CreateSettings(
+            DayOfWeek.Monday, new TimeOnly(21, 0), new TimeOnly(7, 0),
+            sentenceCount: 0, reservations: [reservation, future]);
+        var store = new RecordingStore(settings);
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), timeProvider);
+        await runtime.InitializeAsync();
+        if (emergencyUnlockActive)
+        {
+            await runtime.StartEmergencyUnlockAsync();
+            timeProvider.AdvanceMonotonic(TimeSpan.FromMinutes(4));
+            timeProvider.SetUtcNow(timeProvider.GetUtcNow().AddMinutes(4));
+            await runtime.RefreshAsync();
+        }
+
+        DateTime? emergencyEnd = runtime.CurrentSnapshot.EmergencyUnlockEndLocalTime;
+        ReservationChangeStatus result = await runtime.RemoveReservationAsync(reservation.Id);
+
+        Assert.AreEqual(ReservationChangeStatus.Removed, result);
+        Assert.AreEqual(1, store.SaveCount);
+        CollectionAssert.AreEqual(new[] { future }, store.Settings.Reservations.ToArray());
+        Assert.AreEqual(store.Settings, runtime.CurrentSnapshot.Settings);
+        Assert.AreEqual(settings.WeeklySchedule, store.Settings.WeeklySchedule);
+        Assert.AreEqual(settings.EmergencyUnlock, store.Settings.EmergencyUnlock);
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.HasActiveReservation);
+        Assert.AreEqual(expectedLock, runtime.CurrentSnapshot.Evaluation.LockRequired);
+        Assert.AreEqual(expectedLock, lockPort.AppliedRequirements.Last());
+        Assert.AreEqual(emergencyUnlockActive, runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
+        Assert.AreEqual(emergencyEnd, runtime.CurrentSnapshot.EmergencyUnlockEndLocalTime);
+        Assert.AreEqual(hour == 12, runtime.CurrentSnapshot.Evaluation.IsSettingsChangeAllowed);
+        if (emergencyUnlockActive)
+        {
+            timeProvider.AdvanceMonotonic(TimeSpan.FromMinutes(6));
+            await runtime.RefreshAsync();
+            Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
+            Assert.IsTrue(lockPort.AppliedRequirements.Last());
+        }
+    }
+
+    [TestMethod]
+    [DataRow(21, 59, 22, 0)]
+    [DataRow(22, 59, 23, 0)]
+    public async Task RemovingReservationReevaluatesCurrentTimeBeforeTheNextRefresh(
+        int initialHour,
+        int initialMinute,
+        int removalHour,
+        int removalMinute)
+    {
+        var timeProvider = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 10, initialHour, initialMinute, 0, TimeSpan.Zero));
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 10), new TimeOnly(22, 0), new TimeOnly(23, 0), "경계");
+        var store = new RecordingStore(CreateSettings(
+            DayOfWeek.Monday, new TimeOnly(21, 0), new TimeOnly(7, 0), reservations: [reservation]));
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), timeProvider);
+        await runtime.InitializeAsync();
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, removalHour, removalMinute, 0, TimeSpan.Zero));
+
+        Assert.AreEqual(ReservationChangeStatus.Removed, await runtime.RemoveReservationAsync(reservation.Id));
+        Assert.IsEmpty(store.Settings.Reservations);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        Assert.IsTrue(lockPort.AppliedRequirements.Last());
+        Assert.AreEqual(1, store.SaveCount);
+    }
+
+    [TestMethod]
+    [DataRow(false, false)]
+    [DataRow(false, true)]
+    [DataRow(true, false)]
+    [DataRow(true, true)]
+    public async Task RemovingFutureAndExpiredReservationsPreservesCurrentLockConditions(
+        bool activeReservation,
+        bool emergencyUnlockActive)
+    {
+        var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 30, 0, TimeSpan.Zero));
+        var active = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 10), new TimeOnly(22, 0), new TimeOnly(23, 0), "적용 중");
+        var future = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 11), new TimeOnly(10, 0), new TimeOnly(11, 0), "미래");
+        var expired = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 9), new TimeOnly(10, 0), new TimeOnly(11, 0), "지난 예약");
+        var settings = CreateSettings(
+            DayOfWeek.Monday, new TimeOnly(21, 0), new TimeOnly(7, 0),
+            sentenceCount: 0, reservations: activeReservation ? [active, future, expired] : [future, expired]);
+        var store = new RecordingStore(settings);
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), timeProvider);
+        await runtime.InitializeAsync();
+        if (emergencyUnlockActive)
+        {
+            await runtime.StartEmergencyUnlockAsync();
+        }
+
+        int lockApplyCount = lockPort.AppliedRequirements.Count;
+        Assert.AreEqual(ReservationChangeStatus.Removed, await runtime.RemoveReservationAsync(future.Id));
+        Assert.AreEqual(ReservationChangeStatus.Removed, await runtime.RemoveReservationAsync(expired.Id));
+
+        Assert.AreEqual(2, store.SaveCount);
+        Assert.HasCount(activeReservation ? 1 : 0, store.Settings.Reservations);
+        Assert.AreEqual(store.Settings, runtime.CurrentSnapshot.Settings);
+        Assert.AreEqual(activeReservation, runtime.CurrentSnapshot.Evaluation.HasActiveReservation);
+        Assert.AreEqual(emergencyUnlockActive, runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
+        Assert.AreEqual(!activeReservation && !emergencyUnlockActive, runtime.CurrentSnapshot.Evaluation.LockRequired);
+        Assert.HasCount(lockApplyCount, lockPort.AppliedRequirements);
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.IsSettingsChangeAllowed);
+    }
+
+    [TestMethod]
+    public async Task RemovingFutureReservationUpdatesTheNextLockStart()
+    {
+        var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero));
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 10), new TimeOnly(21, 0), new TimeOnly(23, 0), "미래");
+        var store = new RecordingStore(CreateSettings(
+            DayOfWeek.Monday, new TimeOnly(21, 0), new TimeOnly(7, 0), reservations: [reservation]));
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), timeProvider);
+        await runtime.InitializeAsync();
+        Assert.AreEqual(new DateTime(2026, 8, 10, 23, 0, 0), runtime.CurrentSnapshot.NextLockStartLocalTime);
+
+        Assert.AreEqual(ReservationChangeStatus.Removed, await runtime.RemoveReservationAsync(reservation.Id));
+
+        Assert.AreEqual(new DateTime(2026, 8, 10, 21, 0, 0), runtime.CurrentSnapshot.NextLockStartLocalTime);
+        Assert.IsFalse(lockPort.AppliedRequirements.Single());
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 21, 0, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+        Assert.IsTrue(lockPort.AppliedRequirements.Last());
+    }
+
+    [TestMethod]
+    public async Task FailedActiveReservationRemovalSaveKeepsTheReservationAndUnlock()
+    {
+        var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 30, 0, TimeSpan.Zero));
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 10), new TimeOnly(22, 0), new TimeOnly(23, 0), "유지");
+        var settings = CreateSettings(
+            DayOfWeek.Monday, new TimeOnly(21, 0), new TimeOnly(7, 0), reservations: [reservation]);
+        var store = new RecordingStore(settings) { SaveException = new IOException("Disk unavailable.") };
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), timeProvider);
+        await runtime.InitializeAsync();
+
+        await Assert.ThrowsExactlyAsync<IOException>(() => runtime.RemoveReservationAsync(reservation.Id));
+
+        Assert.AreEqual(settings, store.Settings);
+        Assert.AreEqual(settings, runtime.CurrentSnapshot.Settings);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.HasActiveReservation);
+        Assert.IsFalse(lockPort.AppliedRequirements.Single());
+    }
+
+    [TestMethod]
+    public async Task FailedRelockAfterActiveReservationRemovalKeepsDeletionAndRetries()
+    {
+        var timeProvider = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 30, 0, TimeSpan.Zero));
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 10), new TimeOnly(22, 0), new TimeOnly(23, 0), "종료");
+        var store = new RecordingStore(CreateSettings(
+            DayOfWeek.Monday, new TimeOnly(21, 0), new TimeOnly(7, 0), reservations: [reservation]));
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), timeProvider);
+        await runtime.InitializeAsync();
+        lockPort.FailWhenLocking = true;
+
+        await Assert.ThrowsExactlyAsync<UsagePolicySettingsSavedButApplyFailedException>(
             () => runtime.RemoveReservationAsync(reservation.Id));
+
+        Assert.AreEqual(1, store.SaveCount);
+        Assert.IsEmpty(store.Settings.Reservations);
+        Assert.AreEqual(store.Settings, runtime.CurrentSnapshot.Settings);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        lockPort.FailWhenLocking = false;
+        await runtime.RefreshAsync();
+        Assert.HasCount(3, lockPort.AppliedRequirements);
+        Assert.IsTrue(lockPort.AppliedRequirements.Last());
     }
 
     [TestMethod]

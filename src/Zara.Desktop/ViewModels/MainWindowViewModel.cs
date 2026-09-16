@@ -383,9 +383,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             _loadedReservations = snapshot.Settings.Reservations.ToArray();
         }
 
-        UpdateReservationPresentation(
-            snapshot.EvaluatedLocalTime,
-            snapshot.Evaluation.IsSettingsChangeAllowed);
+        UpdateReservationPresentation(snapshot.EvaluatedLocalTime);
         UsagePolicyStatusMessage = GetUsagePolicyStatusMessage(snapshot);
         OnPropertyChanged(nameof(CanChangeSettings));
         OnPropertyChanged(nameof(CanChangeUsagePolicySettings));
@@ -405,11 +403,11 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         ReservationsView.Refresh();
     }
 
-    private void UpdateReservationPresentation(DateTime localNow, bool isSettingsChangeAllowed)
+    private void UpdateReservationPresentation(DateTime localNow)
     {
         foreach (ReservationRowViewModel reservation in Reservations)
         {
-            reservation.UpdatePresentation(localNow, isSettingsChangeAllowed);
+            reservation.UpdatePresentation(localNow);
         }
     }
 

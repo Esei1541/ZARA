@@ -12,9 +12,6 @@ public enum ReservationChangeStatus
     /// <summary>The requested interval overlaps a registered reservation.</summary>
     ConflictsWithExisting,
 
-    /// <summary>The reservation is active at the supplied local time and cannot be removed.</summary>
-    ActiveReservationCannotBeRemoved,
-
     /// <summary>No reservation has the requested identifier.</summary>
     NotFound,
 }
