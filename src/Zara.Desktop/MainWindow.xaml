@@ -318,7 +318,6 @@
                 <DataGridTemplateColumn.CellTemplate>
                   <DataTemplate>
                     <Button Width="68"
-                            IsEnabled="{Binding CanDelete}"
                             Click="DeleteReservation_Click"
                             Content="삭제" />
                   </DataTemplate>

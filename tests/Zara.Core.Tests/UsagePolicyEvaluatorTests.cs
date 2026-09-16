@@ -383,26 +383,29 @@ public sealed class UsagePolicyEvaluatorTests
     }
 
     [TestMethod]
-    public void TryRemoveReservationRejectsTheCurrentlyActiveReservation()
+    public void TryRemoveReservationRemovesOnlyTheRequestedReservation()
     {
         OutOfHoursReservation reservation = Reservation(
-            new DateOnly(2026, 8, 10),
-            new TimeOnly(10, 0),
-            new TimeOnly(11, 0));
-        UsagePolicySettings settings = SettingsWithReservations(reservation);
+            new DateOnly(2026, 8, 10), new TimeOnly(10, 0), new TimeOnly(11, 0));
+        OutOfHoursReservation other = Reservation(
+            new DateOnly(2026, 8, 11), new TimeOnly(10, 0), new TimeOnly(11, 0));
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(9, 0), new TimeOnly(12, 0)),
+            reservation,
+            other);
 
-        ReservationChangeResult result = UsagePolicyEvaluator.TryRemoveReservation(
-            settings,
-            reservation.Id,
-            LocalTime(2026, 8, 10, 10, 30));
+        ReservationChangeResult result = UsagePolicyEvaluator.TryRemoveReservation(settings, reservation.Id);
 
-        Assert.AreEqual(ReservationChangeStatus.ActiveReservationCannotBeRemoved, result.Status);
-        Assert.IsFalse(result.Succeeded);
-        Assert.AreSame(settings, result.Settings);
+        Assert.AreEqual(ReservationChangeStatus.Removed, result.Status);
+        Assert.IsTrue(result.Succeeded);
+        CollectionAssert.AreEqual(new[] { other }, result.Settings.Reservations.ToArray());
+        Assert.HasCount(2, settings.Reservations);
+        Assert.AreEqual(settings.WeeklySchedule, result.Settings.WeeklySchedule);
+        Assert.AreEqual(settings.EmergencyUnlock, result.Settings.EmergencyUnlock);
     }
 
     [TestMethod]
-    public void TryRemoveReservationAllowsExpiredReservationAndLeavesUnknownIdsUntouched()
+    public void TryRemoveReservationLeavesUnknownIdsUntouched()
     {
         OutOfHoursReservation reservation = Reservation(
             new DateOnly(2026, 8, 10),
@@ -412,12 +415,10 @@ public sealed class UsagePolicyEvaluatorTests
 
         ReservationChangeResult removed = UsagePolicyEvaluator.TryRemoveReservation(
             settings,
-            reservation.Id,
-            LocalTime(2026, 8, 10, 11, 0));
+            reservation.Id);
         ReservationChangeResult missing = UsagePolicyEvaluator.TryRemoveReservation(
             removed.Settings,
-            Guid.NewGuid(),
-            LocalTime(2026, 8, 10, 11, 0));
+            Guid.NewGuid());
 
         Assert.AreEqual(ReservationChangeStatus.Removed, removed.Status);
         Assert.IsTrue(removed.Succeeded);

@@ -228,7 +228,7 @@ public sealed class UsagePolicyRuntime : IDisposable
     }
 
     /// <summary>
-    /// Removes a non-active reservation when settings are currently mutable.
+    /// Removes a reservation even while settings are locked, then immediately re-evaluates the lock.
     /// </summary>
     public Task<ReservationChangeStatus> RemoveReservationAsync(
         Guid reservationId,
@@ -236,11 +236,9 @@ public sealed class UsagePolicyRuntime : IDisposable
         ExecuteAsync(
             async () =>
             {
-                ThrowIfSettingsChangeBlocked();
                 ReservationChangeResult result = UsagePolicyEvaluator.TryRemoveReservation(
                     CurrentSnapshot.Settings,
-                    reservationId,
-                    GetCurrentLocalTime());
+                    reservationId);
                 if (result.Succeeded)
                 {
                     await PersistAndApplyAsync(result.Settings, cancellationToken).ConfigureAwait(false);

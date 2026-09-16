@@ -217,6 +217,42 @@ public sealed class MainWindowViewModelTests
     }
 
     [STATestMethod]
+    [DataRow(false, -1)]
+    [DataRow(false, 0)]
+    [DataRow(false, 1)]
+    [DataRow(true, -1)]
+    [DataRow(true, 0)]
+    [DataRow(true, 1)]
+    public async Task AnyReservationCanBeDeletedWithoutEnablingOtherSettings(bool withinUsageBan, int dayOffset)
+    {
+        var timeProvider = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero));
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 10).AddDays(dayOffset),
+            new TimeOnly(8, 0), new TimeOnly(9, 0), "삭제 대상");
+        var other = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 8, 12), new TimeOnly(8, 0), new TimeOnly(9, 0), "유지");
+        UsagePolicySettings settings = withinUsageBan
+            ? SettingsWithMondayRestriction(new TimeOnly(7, 0), new TimeOnly(10, 0))
+            : UsagePolicySettings.Default;
+        var store = new RecordingStore(settings.WithReservations([reservation, other]));
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, timeProvider, lockPort);
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+
+        Assert.AreEqual(!withinUsageBan, viewModel.CanChangeUsagePolicySettings);
+
+        ReservationChangeStatus result = await viewModel.RemoveReservationAsync(reservation.Id);
+
+        Assert.AreEqual(ReservationChangeStatus.Removed, result);
+        Assert.AreEqual(other.Id, viewModel.Reservations.Single().Id);
+        Assert.AreEqual(other.Id, store.Settings.Reservations.Single().Id);
+        Assert.AreEqual(withinUsageBan, lockPort.AppliedRequirements.Last());
+        Assert.AreEqual(!withinUsageBan, viewModel.CanChangeUsagePolicySettings);
+    }
+
+    [STATestMethod]
     public async Task RepeatedSuccessfulSavesRaiseFreshNotificationsEveryTime()
     {
         var store = new RecordingStore(UsagePolicySettings.Default);

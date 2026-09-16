@@ -114,6 +114,52 @@ public sealed class MainWindowScheduleBindingTests
         Assert.AreEqual("19", viewModel.EmergencyDurationMinutesText);
     }
 
+    [STATestMethod]
+    public void AllReservationDeleteButtonsRemainEnabledWhenSettingsAreDisabled()
+    {
+        using var viewModel = new MainWindowViewModel(
+            restartOnExitWhenUnlocked: true,
+            updateRestartSetting: _ => Task.CompletedTask,
+            requestLock: () => Task.CompletedTask,
+            requestDevelopmentUnlock: () => Task.CompletedTask);
+        var localNow = new DateTime(2026, 8, 10, 8, 30, 0);
+        foreach (int dayOffset in new[] { -1, 0, 1 })
+        {
+            var reservation = new OutOfHoursReservation(
+                Guid.NewGuid(), DateOnly.FromDateTime(localNow).AddDays(dayOffset),
+                new TimeOnly(8, 0), new TimeOnly(9, 0), "삭제 가능");
+            var row = new ReservationRowViewModel(reservation);
+            row.UpdatePresentation(localNow);
+            viewModel.Reservations.Add(row);
+        }
+
+        var window = CreateWindow(viewModel);
+        try
+        {
+            window.MainTabs.SelectedIndex = 3;
+            window.Show();
+            var grid = FindVisualChild<DataGrid>(window.MainTabs);
+            var addButton = FindVisualChild<Button>((System.Windows.DependencyObject)
+                ((TabItem)window.MainTabs.SelectedItem).Content);
+            Assert.IsFalse(addButton.IsEnabled);
+            foreach (ReservationRowViewModel reservation in viewModel.Reservations)
+            {
+                grid.ScrollIntoView(reservation);
+                grid.UpdateLayout();
+                var row = (DataGridRow)grid.ItemContainerGenerator.ContainerFromItem(reservation);
+                var presenter = FindVisualChild<DataGridCellsPresenter>(row);
+                var cell = (DataGridCell)presenter.ItemContainerGenerator.ContainerFromIndex(5);
+                var deleteButton = FindVisualChild<Button>(cell);
+                Assert.IsTrue(deleteButton.IsEnabled);
+                Assert.AreEqual("삭제", deleteButton.Content);
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
     private static MainWindow CreateWindow(MainWindowViewModel viewModel) =>
         new(viewModel)
         {

@@ -118,10 +118,6 @@ public partial class MainWindow : Window
                 .ConfigureAwait(true);
             ShowReservationDeleteResult(status);
         }
-        catch (UsagePolicySettingsLockedException)
-        {
-            ShowMessage("사용 금지 시간에는 설정을 변경할 수 없습니다.", MessageBoxImage.Information);
-        }
         catch (UsagePolicySettingsSavedButApplyFailedException)
         {
             ShowMessage(
@@ -160,10 +156,6 @@ public partial class MainWindow : Window
         {
             case ReservationChangeStatus.Removed:
                 ShowMessage("시간 외 사용 예약을 삭제했습니다.", MessageBoxImage.Information);
-                break;
-
-            case ReservationChangeStatus.ActiveReservationCannotBeRemoved:
-                ShowMessage("현재 적용 중인 예약은 삭제할 수 없습니다.", MessageBoxImage.Information);
                 break;
 
             case ReservationChangeStatus.NotFound:

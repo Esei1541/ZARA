@@ -169,16 +169,14 @@ public static class UsagePolicyEvaluator
     }
 
     /// <summary>
-    /// Removes a reservation unless it is active at the supplied local time.
+    /// Removes a registered reservation regardless of its interval or the current restriction.
     /// </summary>
     /// <param name="settings">The current immutable settings snapshot.</param>
     /// <param name="reservationId">The stable identifier of the reservation to remove.</param>
-    /// <param name="localNow">The caller-supplied local time used to check active status.</param>
     /// <returns>The changed snapshot or the unchanged snapshot with the rejection status.</returns>
     public static ReservationChangeResult TryRemoveReservation(
         UsagePolicySettings settings,
-        Guid reservationId,
-        DateTime localNow)
+        Guid reservationId)
     {
         ArgumentNullException.ThrowIfNull(settings);
         if (reservationId == Guid.Empty)
@@ -191,13 +189,6 @@ public static class UsagePolicyEvaluator
         if (reservation is null)
         {
             return new ReservationChangeResult(ReservationChangeStatus.NotFound, settings);
-        }
-
-        if (Contains(reservation, localNow))
-        {
-            return new ReservationChangeResult(
-                ReservationChangeStatus.ActiveReservationCannotBeRemoved,
-                settings);
         }
 
         return new ReservationChangeResult(
