@@ -210,7 +210,8 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             _usagePolicyRuntime,
             _restartSettings.RestartOnExitWhenUnlocked,
             UpdateRestartSettingAsync,
-            RequestLockAsync);
+            RequestLockAsync,
+            RequestDevelopmentUnlockAsync);
         SubscribeUsagePolicyNotifications();
 
         await _supervisionConnection

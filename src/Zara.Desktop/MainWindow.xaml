@@ -64,14 +64,23 @@
                      Foreground="#FF5C6470"
                      TextWrapping="Wrap"
                      Text="사용 금지 시간에는 모든 설정 변경이 비활성화됩니다. 시간 외 사용 예약이나 긴급 해제가 적용 중이어도 같습니다." />
-          <Button Grid.Row="4"
-                  MinWidth="156"
-                  Height="36"
-                  Padding="16,0"
-                  HorizontalAlignment="Right"
-                  Command="{Binding StartLockDemoCommand}"
-                  Content="오버레이 시연 시작"
-                  FontWeight="SemiBold" />
+          <StackPanel Grid.Row="4"
+                      HorizontalAlignment="Right"
+                      Orientation="Horizontal">
+            <Button MinWidth="156"
+                    Height="36"
+                    Padding="16,0"
+                    Command="{Binding StartLockDemoCommand}"
+                    Content="오버레이 시연 시작"
+                    FontWeight="SemiBold" />
+            <Button MinWidth="156"
+                    Height="36"
+                    Margin="12,0,0,0"
+                    Padding="16,0"
+                    Command="{Binding DevelopmentUnlockCommand}"
+                    Content="잠금 해제(개발용)"
+                    FontWeight="SemiBold" />
+          </StackPanel>
         </Grid>
       </TabItem>
 

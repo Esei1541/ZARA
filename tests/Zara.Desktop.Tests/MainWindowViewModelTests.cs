@@ -243,7 +243,8 @@ public sealed class MainWindowViewModelTests
             runtime,
             restartOnExitWhenUnlocked: true,
             updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.FromException(new InvalidOperationException("Failed.")));
+            requestLock: () => Task.FromException(new InvalidOperationException("Failed.")),
+            requestDevelopmentUnlock: () => Task.CompletedTask);
         var notificationSource = new TaskCompletionSource<MainWindowNotificationEventArgs>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         viewModel.NotificationRequested += (_, notification) =>
@@ -384,7 +385,8 @@ public sealed class MainWindowViewModelTests
             runtime,
             restartOnExitWhenUnlocked: true,
             updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.CompletedTask);
+            requestLock: () => Task.CompletedTask,
+            requestDevelopmentUnlock: () => Task.CompletedTask);
 
     private static UsagePolicyRuntime CreateRuntime(
         RecordingStore store,
