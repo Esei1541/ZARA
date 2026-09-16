@@ -375,6 +375,27 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         }
 
         ShowMainWindow();
+
+        try
+        {
+            await GetUsagePolicyRuntime()
+                .DisableWeeklyScheduleForDevelopmentAsync()
+                .ConfigureAwait(true);
+            _mainWindowViewModel?.ResetWeeklyScheduleEdits();
+        }
+        catch (Exception exception)
+        {
+            Trace.TraceError("Disabling the development usage restrictions failed: {0}", exception);
+            string message = exception is UsagePolicySettingsSavedButApplyFailedException
+                ? MainWindowViewModel.SavedButApplyFailedMessage
+                : "잠금은 해제했지만 모든 요일의 사용 체크를 해제해 저장하지 못했습니다. 다시 시도하세요.";
+            _ = System.Windows.MessageBox.Show(
+                MainWindow,
+                message,
+                "잠금 해제(개발용)",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
     }
 
     private async Task RequestEmergencyUnlockAsync()

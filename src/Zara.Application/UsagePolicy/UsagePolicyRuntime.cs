@@ -151,6 +151,33 @@ public sealed class UsagePolicyRuntime : IDisposable
     }
 
     /// <summary>
+    /// Disables every weekday restriction for development safety, even while settings are locked,
+    /// preserving the configured times, emergency-unlock settings, and reservations.
+    /// </summary>
+    public Task DisableWeeklyScheduleForDevelopmentAsync(
+        CancellationToken cancellationToken = default) =>
+        ExecuteAsync(
+            async () =>
+            {
+                UsagePolicySettings current = CurrentSnapshot.Settings;
+                WeeklyUsageRestrictionSchedule schedule = current.WeeklySchedule;
+                foreach (DayOfWeek day in Enum.GetValues<DayOfWeek>())
+                {
+                    DailyUsageRestriction restriction = schedule.GetRestriction(day);
+                    schedule = schedule.WithRestriction(
+                        day,
+                        new DailyUsageRestriction(
+                            isEnabled: false,
+                            restriction.StartTime,
+                            restriction.ReleaseTime));
+                }
+
+                await PersistAndApplyAsync(current.WithWeeklySchedule(schedule), cancellationToken)
+                    .ConfigureAwait(false);
+            },
+            cancellationToken);
+
+    /// <summary>
     /// Replaces only the emergency-unlock settings while preserving the latest weekday schedule
     /// and reservations serialized by this runtime.
     /// </summary>
