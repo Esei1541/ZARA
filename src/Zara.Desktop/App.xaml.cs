@@ -172,7 +172,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             _displayTopology,
             new NativeWindowPositioner(),
             ShowDevelopmentSafetyControls);
-        _lockInputPort = new WindowsLockInputPort();
+        _lockInputPort = new WindowsLockInputPort(_supervisionConnection);
         _lockRuntime = new LockRuntimeUseCase(_overlayPort, _lockInputPort);
         _systemShutdown = new SystemShutdownUseCase(
             _lockRuntime,

@@ -1,3 +1,5 @@
+using Zara.Application.Locking;
+
 namespace Zara.Infrastructure.Windows.Tests;
 
 [TestClass]
@@ -127,6 +129,80 @@ public sealed class WindowsLockInputPortTests
         Assert.AreEqual(1, hook.Stops);
         Assert.IsTrue(hook.Stopped.IsCompletedSuccessfully);
         await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => port.EnableAsync(CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task RestrictionUsesSameUnlockAndDisposePathsAsInput()
+    {
+        var restriction = new RecordingRestriction();
+        var hook = new RecordingHook();
+        var port = new WindowsLockInputPort(() => hook, restriction);
+        await port.DisableAsync(CancellationToken.None);
+        Assert.AreEqual(0, restriction.Restores);
+
+        await port.EnableAsync(CancellationToken.None);
+        Assert.AreEqual(1, restriction.Applies);
+        await port.DisableAsync(CancellationToken.None);
+        Assert.AreEqual(1, restriction.Restores);
+        port.Dispose();
+        Assert.AreEqual(1, restriction.Restores);
+
+        using var secondPort = new WindowsLockInputPort(() => new RecordingHook(), restriction);
+        await secondPort.EnableAsync(CancellationToken.None);
+        secondPort.Dispose();
+        Assert.AreEqual(2, restriction.Restores);
+    }
+
+    [TestMethod]
+    public async Task FailedPolicyAcknowledgementStillRestoresOnUnlock()
+    {
+        var restriction = new RecordingRestriction { FailApply = true };
+        var hook = new RecordingHook();
+        using var port = new WindowsLockInputPort(() => hook, restriction);
+
+        await Assert.ThrowsExactlyAsync<IOException>(() => port.EnableAsync(CancellationToken.None));
+        await port.DisableAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, hook.Stops);
+        Assert.AreEqual(1, restriction.Restores);
+    }
+
+    [TestMethod]
+    public async Task HookStopFailureStillRestoresPolicyAndPolicyFailureCanBeRetried()
+    {
+        var restriction = new RecordingRestriction();
+        var hook = new RecordingHook { FailStop = true };
+        using var port = new WindowsLockInputPort(() => hook, restriction);
+        await port.EnableAsync(CancellationToken.None);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => port.DisableAsync(CancellationToken.None));
+        Assert.AreEqual(1, restriction.Restores);
+        hook.FailStop = false;
+        await port.EnableAsync(CancellationToken.None);
+        restriction.FailRestore = true;
+        await Assert.ThrowsExactlyAsync<IOException>(() => port.DisableAsync(CancellationToken.None));
+        restriction.FailRestore = false;
+        await port.DisableAsync(CancellationToken.None);
+        Assert.AreEqual(3, restriction.Restores);
+    }
+
+    private sealed class RecordingRestriction : ILockInputPort
+    {
+        public int Applies { get; private set; }
+        public int Restores { get; private set; }
+        public bool FailApply { get; init; }
+        public bool FailRestore { get; set; }
+
+        public Task EnableAsync(CancellationToken cancellationToken)
+        {
+            Applies++;
+            return FailApply ? Task.FromException(new IOException("Apply failed.")) : Task.CompletedTask;
+        }
+
+        public Task DisableAsync(CancellationToken cancellationToken)
+        {
+            Restores++;
+            return FailRestore ? Task.FromException(new IOException("Restore failed.")) : Task.CompletedTask;
+        }
     }
 
     private sealed class RecordingHook : IShellShortcutHook

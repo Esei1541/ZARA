@@ -197,12 +197,16 @@ internal static class WindowsServiceHost
             launcher,
             commandSource,
             new SystemSupervisionDelay());
+        var taskManagerRestriction = TaskManagerRestriction.Create(
+            AppContext.BaseDirectory,
+            target.UserSid.Value);
         var pipeServer = new WindowsSupervisionPipeServer(
             commandSource,
             handshakeRegistry,
             target.SessionId,
             target.UserSid,
-            requireInitialServiceLaunch: true);
+            requireInitialServiceLaunch: true,
+            taskManagerRestriction: taskManagerRestriction);
 
         if (!GenerationCoordinator.TryActivate(generation, target.LifecycleVersion))
         {
@@ -229,6 +233,7 @@ internal static class WindowsServiceHost
         finally
         {
             GenerationCoordinator.Clear(generation);
+            taskManagerRestriction.Restore();
         }
     }
 

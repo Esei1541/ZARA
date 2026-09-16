@@ -4,6 +4,7 @@ using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using Zara.Application.Continuity;
+using Zara.Application.Locking;
 using Zara.Supervision.Contracts;
 
 namespace Zara.Infrastructure.Windows.Continuity;
@@ -12,7 +13,7 @@ namespace Zara.Infrastructure.Windows.Continuity;
 /// Maintains one authenticated desktop-to-Service supervision channel and requires an acknowledgement
 /// before a restart lease transition is considered committed.
 /// </summary>
-public sealed class WindowsSupervisionConnection : IRestartContinuityPort, IAsyncDisposable
+public sealed class WindowsSupervisionConnection : IRestartContinuityPort, ILockInputPort, IAsyncDisposable
 {
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(5);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -36,6 +37,36 @@ public sealed class WindowsSupervisionConnection : IRestartContinuityPort, IAsyn
 
     /// <summary>The Service response that established this desktop generation.</summary>
     public SupervisionResponse Registration { get; }
+
+    /// <summary>Restricts Task Manager for the authenticated desktop user.</summary>
+    public Task EnableAsync(CancellationToken cancellationToken) =>
+        ExchangeTaskManagerAsync(
+            SupervisionRequestKind.RestrictTaskManager,
+            SupervisionResponseKind.TaskManagerRestricted,
+            cancellationToken);
+
+    /// <summary>Restores only the Task Manager policy changed by this installation.</summary>
+    public Task DisableAsync(CancellationToken cancellationToken) =>
+        ExchangeTaskManagerAsync(
+            SupervisionRequestKind.RestoreTaskManager,
+            SupervisionResponseKind.TaskManagerRestored,
+            cancellationToken);
+
+    private Task ExchangeTaskManagerAsync(
+        SupervisionRequestKind requestKind,
+        SupervisionResponseKind responseKind,
+        CancellationToken cancellationToken) =>
+        ExchangeForAcknowledgementAsync(
+            new SupervisionRequest(
+                SupervisionProtocol.CurrentVersion,
+                requestKind,
+                Process: null,
+                Lease: null,
+                Revision: null,
+                LaunchToken: null),
+            responseKind,
+            expectedRevision: 0,
+            cancellationToken);
 
     /// <summary>
     /// Connects to the machine-local ZARA Service, authenticates its SCM process before sending any

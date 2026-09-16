@@ -1,5 +1,7 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Pipes;
+using System.Security;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
@@ -24,6 +26,7 @@ internal sealed class WindowsSupervisionPipeServer
     private readonly int _targetSessionId;
     private readonly SecurityIdentifier _targetUserSid;
     private readonly string _desktopExecutablePath;
+    private readonly ITaskManagerRestriction? _taskManagerRestriction;
 
     // The boot-time Service must not let a tokenless desktop claim the first generation before the
     // exact child created with CreateProcessAsUser has registered and reported healthy.
@@ -36,7 +39,8 @@ internal sealed class WindowsSupervisionPipeServer
         int targetSessionId,
         SecurityIdentifier targetUserSid,
         string? installDirectory = null,
-        bool requireInitialServiceLaunch = false)
+        bool requireInitialServiceLaunch = false,
+        ITaskManagerRestriction? taskManagerRestriction = null)
     {
         ArgumentNullException.ThrowIfNull(commandSource);
         ArgumentNullException.ThrowIfNull(handshakeRegistry);
@@ -48,6 +52,7 @@ internal sealed class WindowsSupervisionPipeServer
         _targetSessionId = targetSessionId;
         _targetUserSid = targetUserSid;
         _initialServiceLaunchRequired = requireInitialServiceLaunch;
+        _taskManagerRestriction = taskManagerRestriction;
         string directory = Path.TrimEndingDirectorySeparator(
             Path.GetFullPath(installDirectory ?? AppContext.BaseDirectory));
         _desktopExecutablePath = Path.GetFullPath(
@@ -227,6 +232,17 @@ internal sealed class WindowsSupervisionPipeServer
 
                 switch (request.Kind)
                 {
+                    case SupervisionRequestKind.RestrictTaskManager:
+                    case SupervisionRequestKind.RestoreTaskManager:
+                        ValidateTaskManagerRequest(request);
+                        await ApplyTaskManagerRequestAsync(
+                                channel,
+                                request.Kind,
+                                registration.Process!,
+                                serviceCancellationToken)
+                            .ConfigureAwait(false);
+                        break;
+
                     case SupervisionRequestKind.UpdateLease:
                         ValidateLeaseRequest(request, generationRevision);
                         SupervisionLease requestedLease = request.Lease!;
@@ -322,29 +338,83 @@ internal sealed class WindowsSupervisionPipeServer
         }
         finally
         {
-            if (!serviceCancellationToken.IsCancellationRequested)
+            try
             {
-                await clientProcess.WaitForExitAsync(serviceCancellationToken)
-                    .ConfigureAwait(false);
-                bool explicitExitCompleted =
-                    releaseAcknowledged &&
-                    preparedRelease is not null &&
-                    clientProcess.ExitCode == SupervisionProtocol.ExplicitExitCode;
-                if (explicitExitCompleted)
+                if (!serviceCancellationToken.IsCancellationRequested)
                 {
-                    _lastAcceptedLease = preparedRelease;
-                }
+                    await clientProcess.WaitForExitAsync(serviceCancellationToken)
+                        .ConfigureAwait(false);
+                    bool explicitExitCompleted =
+                        releaseAcknowledged &&
+                        preparedRelease is not null &&
+                        clientProcess.ExitCode == SupervisionProtocol.ExplicitExitCode;
+                    if (explicitExitCompleted)
+                    {
+                        _lastAcceptedLease = preparedRelease;
+                    }
 
-                bool restartRequired =
-                    !explicitExitCompleted &&
-                    (_initialServiceLaunchRequired ||
-                     _lastAcceptedLease?.RestartRequiredAfterExit == true);
-                _commandSource.PublishNext(
-                    restartRequired,
-                    explicitExitCompleted
-                        ? SupervisionDirectiveReason.ExplicitRelease
-                        : SupervisionDirectiveReason.LeaseUpdated);
+                    bool restartRequired =
+                        !explicitExitCompleted &&
+                        (_initialServiceLaunchRequired ||
+                         _lastAcceptedLease?.RestartRequiredAfterExit == true);
+                    _commandSource.PublishNext(
+                        restartRequired,
+                        explicitExitCompleted
+                            ? SupervisionDirectiveReason.ExplicitRelease
+                            : SupervisionDirectiveReason.LeaseUpdated);
+                }
             }
+            finally
+            {
+                _taskManagerRestriction?.Restore();
+            }
+        }
+    }
+
+    private async Task ApplyTaskManagerRequestAsync(
+        ISupervisionMessageChannel channel,
+        SupervisionRequestKind kind,
+        SupervisedProcessIdentity process,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            ITaskManagerRestriction restriction = _taskManagerRestriction ??
+                throw new InvalidOperationException("Task Manager restriction is unavailable.");
+            if (kind == SupervisionRequestKind.RestrictTaskManager)
+            {
+                restriction.Apply(process);
+            }
+            else
+            {
+                restriction.Restore();
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or
+            SecurityException or Win32Exception or InvalidOperationException or AggregateException)
+        {
+            Trace.TraceError("The Task Manager policy request failed: {0}", exception);
+            await WriteRejectedAsync(channel, "TASK_MANAGER_POLICY_FAILED", cancellationToken)
+                .ConfigureAwait(false);
+            return;
+        }
+
+        await WriteAcknowledgementAsync(
+                channel,
+                kind == SupervisionRequestKind.RestrictTaskManager
+                    ? SupervisionResponseKind.TaskManagerRestricted
+                    : SupervisionResponseKind.TaskManagerRestored,
+                revision: 0,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private static void ValidateTaskManagerRequest(SupervisionRequest request)
+    {
+        if (request.Process is not null || request.Lease is not null ||
+            request.Revision is not null || request.LaunchToken is not null)
+        {
+            throw new InvalidDataException("The Task Manager request shape was invalid.");
         }
     }
 

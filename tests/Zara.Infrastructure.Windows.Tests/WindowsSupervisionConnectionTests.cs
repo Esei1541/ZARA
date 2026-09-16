@@ -444,6 +444,60 @@ public sealed class WindowsSupervisionConnectionTests
         await connection.DisposeAsync();
     }
 
+    [TestMethod]
+    public async Task TaskManagerRequestsHaveNoCallerSelectedUserOrRegistryPayload()
+    {
+        string pipeName = CreatePipeName();
+        Task server = RunServerAsync(pipeName, async (reader, writer) =>
+        {
+            _ = await AcceptRegistrationAsync(reader, writer);
+            foreach (var expected in new[]
+            {
+                (SupervisionRequestKind.RestrictTaskManager, SupervisionResponseKind.TaskManagerRestricted),
+                (SupervisionRequestKind.RestoreTaskManager, SupervisionResponseKind.TaskManagerRestored),
+            })
+            {
+                SupervisionRequest request = await WindowsSupervisionConnection
+                    .ReadMessageAsync<SupervisionRequest>(reader, CancellationToken.None);
+                Assert.AreEqual(expected.Item1, request.Kind);
+                Assert.IsNull(request.Process);
+                Assert.IsNull(request.Lease);
+                Assert.IsNull(request.Revision);
+                Assert.IsNull(request.LaunchToken);
+                await WriteResponseAsync(writer, expected.Item2, acknowledgedRevision: 0);
+            }
+        });
+
+        await using WindowsSupervisionConnection connection = await ConnectAsync(pipeName);
+        await connection.EnableAsync(CancellationToken.None);
+        await connection.DisableAsync(CancellationToken.None);
+        await server;
+    }
+
+    [TestMethod]
+    public async Task TaskManagerFailureDoesNotConsumeFollowingLeaseAcknowledgement()
+    {
+        string pipeName = CreatePipeName();
+        Task server = RunServerAsync(pipeName, async (reader, writer) =>
+        {
+            _ = await AcceptRegistrationAsync(reader, writer);
+            _ = await WindowsSupervisionConnection.ReadMessageAsync<SupervisionRequest>(reader, CancellationToken.None);
+            await WindowsSupervisionConnection.WriteMessageAsync(writer,
+                new SupervisionResponse(SupervisionProtocol.CurrentVersion,
+                    SupervisionResponseKind.Rejected, 0, false, "TASK_MANAGER_POLICY_FAILED"),
+                CancellationToken.None);
+            SupervisionRequest next = await WindowsSupervisionConnection
+                .ReadMessageAsync<SupervisionRequest>(reader, CancellationToken.None);
+            Assert.AreEqual(SupervisionRequestKind.UpdateLease, next.Kind);
+            await WriteResponseAsync(writer, SupervisionResponseKind.LeaseAcknowledged, acknowledgedRevision: 1);
+        });
+
+        await using WindowsSupervisionConnection connection = await ConnectAsync(pipeName);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => connection.EnableAsync(CancellationToken.None));
+        _ = await connection.PublishAsync(CreateApplicationLease(1), CancellationToken.None);
+        await server;
+    }
+
     private static RestartContinuityLease CreateApplicationLease(long revision) =>
         new(
             revision,

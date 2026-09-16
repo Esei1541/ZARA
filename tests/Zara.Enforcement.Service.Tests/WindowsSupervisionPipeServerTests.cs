@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Principal;
 using Zara.Enforcement.Service.Supervision;
+using Zara.Enforcement.Service.Windows;
 using Zara.Supervision.Contracts;
 
 namespace Zara.Enforcement.Service.Tests;
@@ -363,6 +364,148 @@ public sealed class WindowsSupervisionPipeServerTests
         Assert.IsTrue(source.IsSessionEnding);
     }
 
+    [TestMethod]
+    public async Task TaskManagerRequestsUseRegisteredIdentityAndRestoreAtProcessExit()
+    {
+        var restriction = new RecordingRestriction();
+        var source = CreateReleasedSource();
+        var server = CreateServer(source, new DesktopLaunchHandshakeRegistry(),
+            taskManagerRestriction: restriction);
+        SupervisionRequest registration = CreateRegistration(150, true, true, null);
+        var channel = new ScriptedChannel([
+            CreateTaskManagerRequest(SupervisionRequestKind.RestrictTaskManager),
+            CreateTaskManagerRequest(SupervisionRequestKind.RestoreTaskManager),
+        ]);
+        var lifetime = new FakeDesktopLifetime(150);
+        lifetime.Exit(1);
+
+        await server.HandleAuthenticatedConnectionAsync(channel, lifetime, registration, CancellationToken.None);
+
+        Assert.AreEqual(registration.Process, restriction.Process);
+        Assert.AreEqual(1, restriction.Applies);
+        Assert.AreEqual(2, restriction.Restores);
+        CollectionAssert.AreEqual(new[]
+        {
+            SupervisionResponseKind.Registered,
+            SupervisionResponseKind.TaskManagerRestricted,
+            SupervisionResponseKind.TaskManagerRestored,
+        }, channel.Responses.Select(response => response.Kind).ToArray());
+        Assert.IsTrue(source.Current.RestartRequired);
+    }
+
+    [TestMethod]
+    public async Task TaskManagerRequestCannotSupplyAnotherProcess()
+    {
+        var restriction = new RecordingRestriction();
+        var server = CreateServer(CreateReleasedSource(), new DesktopLaunchHandshakeRegistry(),
+            taskManagerRestriction: restriction);
+        var registration = CreateRegistration(151, true, true, null);
+        var channel = new ScriptedChannel([
+            CreateTaskManagerRequest(SupervisionRequestKind.RestrictTaskManager) with
+            {
+                Process = registration.Process! with { ProcessId = 999 },
+            },
+        ]);
+        var lifetime = new FakeDesktopLifetime(151);
+        lifetime.Exit(1);
+
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() =>
+            server.HandleAuthenticatedConnectionAsync(channel, lifetime, registration, CancellationToken.None));
+
+        Assert.AreEqual(0, restriction.Applies);
+    }
+
+    [TestMethod]
+    public async Task TaskManagerFailureReturnsRejectionAndKeepsLeaseChannelUsable()
+    {
+        var restriction = new RecordingRestriction { FailApply = true };
+        var server = CreateServer(CreateReleasedSource(), new DesktopLaunchHandshakeRegistry(),
+            taskManagerRestriction: restriction);
+        var channel = new ScriptedChannel([
+            CreateTaskManagerRequest(SupervisionRequestKind.RestrictTaskManager),
+            new SupervisionRequest(SupervisionProtocol.CurrentVersion, SupervisionRequestKind.UpdateLease,
+                null, new SupervisionLease(1, true, true), null, null),
+        ]);
+        var lifetime = new FakeDesktopLifetime(152);
+        lifetime.Exit(1);
+
+        await server.HandleAuthenticatedConnectionAsync(channel, lifetime,
+            CreateRegistration(152, true, true, null), CancellationToken.None);
+
+        SupervisionResponse[] responses = channel.Responses.ToArray();
+        Assert.HasCount(3, responses);
+        Assert.AreEqual("TASK_MANAGER_POLICY_FAILED", responses[1].ErrorCode);
+        Assert.AreEqual(SupervisionResponseKind.LeaseAcknowledged, responses[2].Kind);
+        Assert.AreEqual(1, restriction.Restores);
+    }
+
+    [TestMethod]
+    public async Task ServiceStopRestoresRestrictionEvenWhenDesktopIsStillRunning()
+    {
+        var restriction = new RecordingRestriction();
+        var server = CreateServer(CreateReleasedSource(), new DesktopLaunchHandshakeRegistry(),
+            taskManagerRestriction: restriction);
+        var channel = new ScriptedChannel([
+            CreateTaskManagerRequest(SupervisionRequestKind.RestrictTaskManager),
+        ], completeReadsWhenEmpty: false);
+        using var stopping = new CancellationTokenSource();
+        var lifetime = new FakeDesktopLifetime(153);
+        Task handler = server.HandleAuthenticatedConnectionAsync(channel, lifetime,
+            CreateRegistration(153, true, true, null), stopping.Token);
+        await restriction.Applied.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        stopping.Cancel();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(() => handler);
+        Assert.AreEqual(1, restriction.Restores);
+        Assert.AreEqual(0, lifetime.WaitCount);
+    }
+
+    [TestMethod]
+    public async Task LostPolicyAcknowledgementRestoresOnlyAfterExactDesktopExit()
+    {
+        var restriction = new RecordingRestriction();
+        var server = CreateServer(CreateReleasedSource(), new DesktopLaunchHandshakeRegistry(),
+            taskManagerRestriction: restriction);
+        var channel = new ScriptedChannel([
+            CreateTaskManagerRequest(SupervisionRequestKind.RestrictTaskManager),
+        ], failWriteNumber: 2);
+        var lifetime = new FakeDesktopLifetime(154);
+        Task handler = server.HandleAuthenticatedConnectionAsync(channel, lifetime,
+            CreateRegistration(154, true, true, null), CancellationToken.None);
+        await restriction.Applied.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsFalse(handler.IsCompleted);
+        Assert.AreEqual(0, restriction.Restores);
+
+        lifetime.Exit(1);
+        await Assert.ThrowsExactlyAsync<IOException>(() => handler);
+        Assert.AreEqual(1, restriction.Restores);
+    }
+
+    private static SupervisionRequest CreateTaskManagerRequest(SupervisionRequestKind kind) =>
+        new(SupervisionProtocol.CurrentVersion, kind, null, null, null, null);
+
+    private sealed class RecordingRestriction : ITaskManagerRestriction
+    {
+        public SupervisedProcessIdentity? Process { get; private set; }
+        public int Applies { get; private set; }
+        public int Restores { get; private set; }
+        public bool FailApply { get; init; }
+        public TaskCompletionSource Applied { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Apply(SupervisedProcessIdentity process)
+        {
+            Process = process;
+            Applies++;
+            Applied.TrySetResult();
+            if (FailApply)
+            {
+                throw new IOException("Policy write failed.");
+            }
+        }
+
+        public void Restore() => Restores++;
+    }
+
     private static async Task<TestContext> CreateRecoveryContextAsync()
     {
         var source = CreateReleasedSource();
@@ -392,13 +535,15 @@ public sealed class WindowsSupervisionPipeServerTests
     private static WindowsSupervisionPipeServer CreateServer(
         LatestSupervisionCommandSource source,
         DesktopLaunchHandshakeRegistry registry,
-        bool requireInitialServiceLaunch = false) =>
+        bool requireInitialServiceLaunch = false,
+        ITaskManagerRestriction? taskManagerRestriction = null) =>
         new(
             source,
             registry,
             SessionId,
             new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, domainSid: null),
-            requireInitialServiceLaunch: requireInitialServiceLaunch);
+            requireInitialServiceLaunch: requireInitialServiceLaunch,
+            taskManagerRestriction: taskManagerRestriction);
 
     private static SupervisionRequest CreateRegistration(
         int processId,

@@ -6,10 +6,10 @@ namespace Zara.Supervision.Contracts;
 public static class SupervisionProtocol
 {
     /// <summary>The only protocol version accepted by this build.</summary>
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
 
     /// <summary>The machine-local named pipe owned by the ZARA Service.</summary>
-    public const string PipeName = "ZARA.Supervision.v2";
+    public const string PipeName = "ZARA.Supervision.v3";
 
     /// <summary>
     /// Marks a desktop process launched by the Service, either for the first interactive logon or
@@ -43,6 +43,8 @@ public enum SupervisionRequestKind
     ReportHealthy = 3,
     ReleaseForExplicitExit = 4,
     CommitLease = 5,
+    RestrictTaskManager = 6,
+    RestoreTaskManager = 7,
 }
 
 /// <summary>
@@ -56,6 +58,8 @@ public enum SupervisionResponseKind
     ExitAcknowledged = 4,
     Rejected = 5,
     LeasePrepared = 6,
+    TaskManagerRestricted = 7,
+    TaskManagerRestored = 8,
 }
 
 /// <summary>

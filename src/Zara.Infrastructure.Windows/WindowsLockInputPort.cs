@@ -3,14 +3,16 @@ using Zara.Application.Locking;
 namespace Zara.Infrastructure.Windows;
 
 /// <summary>
-/// Owns a shell-shortcut hook only while the interactive session is locked.
+/// Owns shell-shortcut suppression and Task Manager restriction while the session is locked.
 /// </summary>
 public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
 {
     private readonly Func<IShellShortcutHook> _createHook;
+    private readonly ILockInputPort? _taskManagerRestriction;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private IShellShortcutHook? _hook;
     private bool _stopping;
+    private bool _restrictionRequested;
     private int _disposed;
 
     /// <summary>
@@ -21,9 +23,19 @@ public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
     {
     }
 
-    internal WindowsLockInputPort(Func<IShellShortcutHook> createHook)
+    /// <summary>Combines session input suppression with the authenticated Service policy adapter.</summary>
+    public WindowsLockInputPort(ILockInputPort taskManagerRestriction)
+        : this(static () => new WindowsShellShortcutHook(), taskManagerRestriction)
+    {
+        ArgumentNullException.ThrowIfNull(taskManagerRestriction);
+    }
+
+    internal WindowsLockInputPort(
+        Func<IShellShortcutHook> createHook,
+        ILockInputPort? taskManagerRestriction = null)
     {
         _createHook = createHook;
+        _taskManagerRestriction = taskManagerRestriction;
     }
 
     /// <inheritdoc />
@@ -38,6 +50,7 @@ public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
             {
                 if (!_stopping && !_hook.Stopped.IsCompleted)
                 {
+                    await RestrictTaskManagerAsync().ConfigureAwait(false);
                     return;
                 }
 
@@ -57,6 +70,8 @@ public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
                 await StopCoreAsync().ConfigureAwait(false);
                 throw;
             }
+
+            await RestrictTaskManagerAsync().ConfigureAwait(false);
         }
         finally
         {
@@ -70,7 +85,7 @@ public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await StopCoreAsync().ConfigureAwait(false);
+            await RestoreInputAsync().ConfigureAwait(false);
         }
         finally
         {
@@ -91,7 +106,7 @@ public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
         _gate.Wait();
         try
         {
-            StopCoreAsync().GetAwaiter().GetResult();
+            RestoreInputAsync().GetAwaiter().GetResult();
         }
         finally
         {
@@ -100,6 +115,32 @@ public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
 
         // As with LockRuntimeUseCase, leave the semaphore alive for in-flight waiters.
         GC.SuppressFinalize(this);
+    }
+
+    private async Task RestrictTaskManagerAsync()
+    {
+        if (_taskManagerRestriction is not null)
+        {
+            // A failed acknowledgement can still follow a successful Windows write.
+            _restrictionRequested = true;
+            await _taskManagerRestriction.EnableAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private async Task RestoreInputAsync()
+    {
+        try
+        {
+            await StopCoreAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            if (_restrictionRequested && _taskManagerRestriction is not null)
+            {
+                await _taskManagerRestriction.DisableAsync(CancellationToken.None).ConfigureAwait(false);
+                _restrictionRequested = false;
+            }
+        }
     }
 
     private async Task StopCoreAsync()

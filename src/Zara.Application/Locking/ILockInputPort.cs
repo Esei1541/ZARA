@@ -1,7 +1,7 @@
 namespace Zara.Application.Locking;
 
 /// <summary>
-/// Restricts shell shortcuts in the interactive user session while the lock is visible.
+/// Restricts shell shortcuts and supported process-launch paths while the lock is visible.
 /// </summary>
 public interface ILockInputPort
 {
