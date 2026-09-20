@@ -41,7 +41,8 @@
                    Text="사용 가능한 시각이 되면 잠금이 해제됩니다. 주무세요!"
                    TextAlignment="Center"
                    TextWrapping="Wrap" />
-        <WrapPanel Margin="0,28,0,0"
+        <WrapPanel x:Name="LockActions"
+                   Margin="0,28,0,0"
                    HorizontalAlignment="Center"
                    Orientation="Horizontal">
           <Button x:Name="EmergencyUnlockButton"
@@ -59,15 +60,7 @@
                   Click="SystemShutdown_Click"
                   Content="시스템 종료"
                   FontWeight="SemiBold" />
-          <Button x:Name="DevelopmentUnlockButton"
-                  MinWidth="168"
-                  Height="42"
-                  Margin="4,0"
-                  Padding="18,0"
-                  Click="DevelopmentUnlock_Click"
-                  Content="잠금 해제(개발용)"
-                  FontWeight="SemiBold"
-                  Visibility="Collapsed" />
+
         </WrapPanel>
       </StackPanel>
     </Border>

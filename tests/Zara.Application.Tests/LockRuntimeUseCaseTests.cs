@@ -36,7 +36,7 @@ public sealed class LockRuntimeUseCaseTests
 
         await useCase.RequestLockAsync();
         await useCase.RequestLockAsync();
-        await useCase.RequestDevelopmentUnlockAsync();
+        await useCase.RequestUnlockAsync();
 
         Assert.AreEqual(
             new LockIntentSnapshot(LockState.Unlocked, Revision: 3),
@@ -66,7 +66,7 @@ public sealed class LockRuntimeUseCaseTests
         var port = new RecordingOverlayPort();
         using var useCase = new LockRuntimeUseCase(port, new RecordingInputPort());
         await useCase.RequestLockAsync();
-        await useCase.RequestDevelopmentUnlockAsync();
+        await useCase.RequestUnlockAsync();
 
         bool restored = await useCase.RestoreLockIfIntentRevisionAsync(expectedIntentRevision: 2);
 
@@ -83,7 +83,7 @@ public sealed class LockRuntimeUseCaseTests
         var port = new RecordingOverlayPort();
         using var useCase = new LockRuntimeUseCase(port, new RecordingInputPort());
         await useCase.RequestLockAsync();
-        await useCase.RequestDevelopmentUnlockAsync();
+        await useCase.RequestUnlockAsync();
 
         bool restored = await useCase.RestoreLockIfIntentRevisionAsync(expectedIntentRevision: 1);
 
@@ -163,14 +163,14 @@ public sealed class LockRuntimeUseCaseTests
     }
 
     [TestMethod]
-    public async Task RequestDevelopmentUnlockAsyncAfterLockHidesOnlyOnce()
+    public async Task RequestUnlockAsyncAfterLockHidesOnlyOnce()
     {
         var port = new RecordingOverlayPort();
         using var useCase = new LockRuntimeUseCase(port, new RecordingInputPort());
         await useCase.RequestLockAsync();
 
-        await useCase.RequestDevelopmentUnlockAsync();
-        await useCase.RequestDevelopmentUnlockAsync();
+        await useCase.RequestUnlockAsync();
+        await useCase.RequestUnlockAsync();
 
         Assert.AreEqual(1, port.ShowCallCount);
         Assert.AreEqual(1, port.HideCallCount);
@@ -178,12 +178,12 @@ public sealed class LockRuntimeUseCaseTests
     }
 
     [TestMethod]
-    public async Task RequestDevelopmentUnlockAsyncFromInitialStateDoesNotCallPort()
+    public async Task RequestUnlockAsyncFromInitialStateDoesNotCallPort()
     {
         var port = new RecordingOverlayPort();
         using var useCase = new LockRuntimeUseCase(port, new RecordingInputPort());
 
-        await useCase.RequestDevelopmentUnlockAsync();
+        await useCase.RequestUnlockAsync();
 
         Assert.AreEqual(0, port.ShowCallCount);
         Assert.AreEqual(0, port.HideCallCount);
@@ -264,7 +264,7 @@ public sealed class LockRuntimeUseCaseTests
     }
 
     [TestMethod]
-    public async Task RequestDevelopmentUnlockAsyncAfterShowFailurePerformsHiddenCleanup()
+    public async Task RequestUnlockAsyncAfterShowFailurePerformsHiddenCleanup()
     {
         var port = new RecordingOverlayPort
         {
@@ -274,7 +274,7 @@ public sealed class LockRuntimeUseCaseTests
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
             () => useCase.RequestLockAsync());
 
-        await useCase.RequestDevelopmentUnlockAsync();
+        await useCase.RequestUnlockAsync();
 
         Assert.AreEqual(1, port.HideCallCount);
         AssertState(useCase, LockState.Unlocked, OverlayProjectionState.Hidden);
@@ -294,7 +294,7 @@ public sealed class LockRuntimeUseCaseTests
         using var useCase = new LockRuntimeUseCase(port, new RecordingInputPort());
         await useCase.RequestLockAsync();
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
-            () => useCase.RequestDevelopmentUnlockAsync());
+            () => useCase.RequestUnlockAsync());
         AssertState(useCase, LockState.Unlocked, OverlayProjectionState.Unknown);
 
         await useCase.PrepareForExitAsync();
@@ -372,7 +372,9 @@ public sealed class LockRuntimeUseCaseTests
 
     [TestMethod]
     [DataRow("regular")]
+#if DEBUG
     [DataRow("development")]
+#endif
     [DataRow("exit")]
     public async Task UnlockRoutesRestoreInputBeforeRemovingTheOverlay(string route)
     {
@@ -390,7 +392,9 @@ public sealed class LockRuntimeUseCaseTests
         await (route switch
         {
             "regular" => runtime.RequestUnlockAsync(),
+#if DEBUG
             "development" => runtime.RequestDevelopmentUnlockAsync(),
+#endif
             _ => runtime.PrepareForExitAsync(),
         });
 
@@ -425,7 +429,7 @@ public sealed class LockRuntimeUseCaseTests
 
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => runtime.RequestLockAsync());
         AssertState(runtime, LockState.Locked, OverlayProjectionState.Unknown);
-        await runtime.RequestDevelopmentUnlockAsync();
+        await runtime.RequestUnlockAsync();
 
         CollectionAssert.AreEqual(ExpectedEnableThenDisableCalls, input.Calls);
         Assert.AreEqual(1, overlay.HideCallCount);

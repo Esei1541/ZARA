@@ -25,11 +25,6 @@ namespace Zara.Desktop;
 /// </summary>
 public partial class App : System.Windows.Application, IDisposable, IUsagePolicyLockPort
 {
-#if ZARA_DEVELOPMENT_SAFETY_CONTROLS
-    private const bool ShowDevelopmentSafetyControls = true;
-#else
-    private const bool ShowDevelopmentSafetyControls = false;
-#endif
 
     private NotifyIcon? _trayIcon;
     private Icon? _applicationIcon;
@@ -171,8 +166,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         _overlayPort = new WpfLockOverlayPort(
             Dispatcher,
             _displayTopology,
-            new NativeWindowPositioner(),
-            ShowDevelopmentSafetyControls);
+            new NativeWindowPositioner());
         _lockInputPort = new WindowsLockInputPort(_supervisionConnection);
         _lockRuntime = new LockRuntimeUseCase(_overlayPort, _lockInputPort);
         _lockRuntime.RecoveryStateChanged += OnLockRecoveryStateChanged;
@@ -183,7 +177,10 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         InitializeShutdownNotifications();
         _overlayPort.SetSystemShutdownHandler(RequestSystemShutdownAsync);
         _overlayPort.SetEmergencyUnlockHandler(RequestEmergencyUnlockAsync);
+#if DEBUG
         _overlayPort.SetDevelopmentUnlockHandler(RequestDevelopmentUnlockAsync);
+#endif
+
         _overlayPort.ProjectionFaulted += OnOverlayProjectionFaulted;
         _applicationIcon = LoadApplicationIcon();
         _trayIcon = CreateTrayIcon(_applicationIcon);
@@ -214,9 +211,12 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         _mainWindowViewModel = new MainWindowViewModel(
             _usagePolicyRuntime,
             _restartSettings.RestartOnExitWhenUnlocked,
-            UpdateRestartSettingAsync,
-            RequestLockAsync,
-            RequestDevelopmentUnlockAsync);
+            UpdateRestartSettingAsync
+#if DEBUG
+            , RequestLockAsync,
+            RequestDevelopmentUnlockAsync
+#endif
+            );
         SubscribeUsagePolicyNotifications();
 
         await _supervisionConnection
@@ -282,6 +282,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         return trayIcon;
     }
 
+#if DEBUG
     private async Task RequestLockAsync()
     {
         ThrowIfShuttingDown();
@@ -293,6 +294,8 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         _lockConditionRequired = true;
         await RequireOverlayProjectionAsync().ConfigureAwait(true);
     }
+
+#endif
 
     /// <inheritdoc />
     public async Task ApplyPolicyLockRequirementAsync(
@@ -359,6 +362,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         }
     }
 
+#if DEBUG
     private async Task RequestDevelopmentUnlockAsync()
     {
         ThrowIfShuttingDown();
@@ -407,6 +411,8 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
                 MessageBoxImage.Error);
         }
     }
+
+#endif
 
     private async Task RequestEmergencyUnlockAsync()
     {

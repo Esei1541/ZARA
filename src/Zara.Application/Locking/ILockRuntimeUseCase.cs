@@ -43,6 +43,7 @@ public interface ILockRuntimeUseCase
     /// <returns>A task that completes after all effects produced by the request finish.</returns>
     Task RequestUnlockAsync(CancellationToken cancellationToken = default);
 
+#if DEBUG
     /// <summary>
     /// Requests the development safety unlock and waits until all overlays are removed.
     /// This remains separate from product policy so development recovery keeps its unconditional
@@ -51,6 +52,8 @@ public interface ILockRuntimeUseCase
     /// <param name="cancellationToken">Cancels the pending request.</param>
     /// <returns>A task that completes after all effects produced by the request finish.</returns>
     Task RequestDevelopmentUnlockAsync(CancellationToken cancellationToken = default);
+
+#endif
 
     /// <summary>
     /// Restores the lock only when no newer intent has replaced the expected revision.

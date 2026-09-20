@@ -9,8 +9,6 @@
     <StartupObject>Zara.Desktop.Program</StartupObject>
     <AssemblyName>Zara.Desktop</AssemblyName>
     <RootNamespace>Zara.Desktop</RootNamespace>
-    <EnableDevelopmentSafetyControls Condition="'$(EnableDevelopmentSafetyControls)' == ''">true</EnableDevelopmentSafetyControls>
-    <DefineConstants Condition="'$(EnableDevelopmentSafetyControls)' == 'true'">$(DefineConstants);ZARA_DEVELOPMENT_SAFETY_CONTROLS</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -32,9 +30,4 @@
     </Content>
   </ItemGroup>
 
-  <Target Name="RejectIncompleteProductSafetyArtifact"
-          BeforeTargets="PrepareForBuild"
-          Condition="'$(EnableDevelopmentSafetyControls)' != 'true'">
-    <Error Text="Product artifacts without development safety controls are blocked until the product emergency-unlock path is implemented." />
-  </Target>
 </Project>

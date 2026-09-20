@@ -142,6 +142,7 @@ public sealed class MainWindowViewModelTests
             viewModel.UsagePolicyStatusMessage);
     }
 
+#if DEBUG
     [STATestMethod]
     [DataRow(true)]
     [DataRow(false)]
@@ -187,6 +188,8 @@ public sealed class MainWindowViewModelTests
         Assert.IsTrue(viewModel.SaveEmergencyUnlockSettingsCommand.CanExecute(parameter: null));
         Assert.IsTrue(viewModel.ToggleRestartSettingCommand.CanExecute(parameter: null));
     }
+
+#endif
 
     [STATestMethod]
     public async Task ReservationPresentationUsesTheRuntimeEvaluationTime()
@@ -313,6 +316,7 @@ public sealed class MainWindowViewModelTests
         Assert.IsTrue(runtime.CurrentSnapshot.Settings.WeeklySchedule.Monday.IsEnabled);
     }
 
+#if DEBUG
     [STATestMethod]
     public async Task LockDemoFailureUsesItsOwnPopupTitleAndMessage()
     {
@@ -324,9 +328,12 @@ public sealed class MainWindowViewModelTests
         using var viewModel = new MainWindowViewModel(
             runtime,
             restartOnExitWhenUnlocked: true,
-            updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.FromException(new InvalidOperationException("Failed.")),
-            requestDevelopmentUnlock: () => Task.CompletedTask);
+            updateRestartSetting: _ => Task.CompletedTask
+#if DEBUG
+            , requestLock: () => Task.FromException(new InvalidOperationException("Failed.")),
+            requestDevelopmentUnlock: () => Task.CompletedTask
+#endif
+            );
         var notificationSource = new TaskCompletionSource<MainWindowNotificationEventArgs>(
             TaskCreationOptions.RunContinuationsAsynchronously);
         viewModel.NotificationRequested += (_, notification) =>
@@ -342,6 +349,8 @@ public sealed class MainWindowViewModelTests
             "잠금 화면을 열지 못했습니다. 잠시 후 다시 시도하세요.",
             result.Message);
     }
+
+#endif
 
     [STATestMethod]
     public async Task InvalidEnabledMidnightIntervalRaisesKoreanPopupResult()
@@ -466,9 +475,12 @@ public sealed class MainWindowViewModelTests
         new(
             runtime,
             restartOnExitWhenUnlocked: true,
-            updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.CompletedTask,
-            requestDevelopmentUnlock: () => Task.CompletedTask);
+            updateRestartSetting: _ => Task.CompletedTask
+#if DEBUG
+            , requestLock: () => Task.CompletedTask,
+            requestDevelopmentUnlock: () => Task.CompletedTask
+#endif
+            );
 
     private static UsagePolicyRuntime CreateRuntime(
         RecordingStore store,

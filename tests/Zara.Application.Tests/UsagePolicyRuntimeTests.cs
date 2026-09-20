@@ -585,6 +585,7 @@ public sealed class UsagePolicyRuntimeTests
             store.Settings.Reservations.ToArray());
     }
 
+#if DEBUG
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
@@ -692,6 +693,8 @@ public sealed class UsagePolicyRuntimeTests
         await runtime.RefreshAsync();
         Assert.IsFalse(lockPort.AppliedRequirements.Last());
     }
+
+#endif
 
     [TestMethod]
     public async Task ConcurrentTabSavesPreserveBothLatestChanges()

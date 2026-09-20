@@ -10,4 +10,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Zara.Supervision.Contracts\Zara.Supervision.Contracts.csproj" />
   </ItemGroup>
+
+  <ItemGroup Condition="'$(SelfContained)' == 'true'">
+    <!-- The installer places both executables beside the same Windows Desktop runtime. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+  </ItemGroup>
 </Project>

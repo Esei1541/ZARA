@@ -14,13 +14,15 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly WindowsDisplayTopology _displayTopology;
     private readonly INativeWindowPositioner _windowPositioner;
-    private readonly bool _showDevelopmentSafetyControls;
     private readonly Dictionary<string, OverlayWindow> _windows =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _failedDevices = new(StringComparer.OrdinalIgnoreCase);
     private Func<Task>? _requestSystemShutdown;
     private Func<Task>? _requestEmergencyUnlock;
+#if DEBUG
     private Func<Task>? _requestDevelopmentUnlock;
+#endif
+
     private bool _emergencyUnlockEnabled;
     private bool _systemShutdownEnabled = true;
     private bool _recoveryActive;
@@ -33,13 +35,11 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     internal WpfLockOverlayPort(
         Dispatcher dispatcher,
         WindowsDisplayTopology displayTopology,
-        INativeWindowPositioner windowPositioner,
-        bool showDevelopmentSafetyControls)
+        INativeWindowPositioner windowPositioner)
     {
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _displayTopology = displayTopology ?? throw new ArgumentNullException(nameof(displayTopology));
         _windowPositioner = windowPositioner ?? throw new ArgumentNullException(nameof(windowPositioner));
-        _showDevelopmentSafetyControls = showDevelopmentSafetyControls;
     }
 
     internal event EventHandler<OverlayProjectionFaultEventArgs>? ProjectionFaulted;
@@ -56,6 +56,7 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         _requestSystemShutdown = requestSystemShutdown;
     }
 
+#if DEBUG
     internal void SetDevelopmentUnlockHandler(Func<Task> requestDevelopmentUnlock)
     {
         ArgumentNullException.ThrowIfNull(requestDevelopmentUnlock);
@@ -67,6 +68,8 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
 
         _requestDevelopmentUnlock = requestDevelopmentUnlock;
     }
+
+#endif
 
     internal void SetEmergencyUnlockHandler(Func<Task> requestEmergencyUnlock)
     {
@@ -294,9 +297,11 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     {
         var window = new OverlayWindow(
             RequestSystemShutdownAsync,
-            RequestEmergencyUnlockAsync,
-            RequestDevelopmentUnlockAsync,
-            _showDevelopmentSafetyControls)
+            RequestEmergencyUnlockAsync
+#if DEBUG
+            , RequestDevelopmentUnlockAsync
+#endif
+            )
         {
             // Direct ordinary typing to the first lock surface, not the previously active app.
             // Additional monitors must not take focus from an open emergency-unlock dialog.
@@ -329,12 +334,15 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         _windowPositioner.PositionTopmostNoActivate(handle, pixelBounds);
     }
 
+#if DEBUG
     private Task RequestDevelopmentUnlockAsync()
     {
         Func<Task> handler = _requestDevelopmentUnlock ??
             throw new InvalidOperationException("The development unlock handler is not configured.");
         return handler();
     }
+
+#endif
 
     private Task RequestEmergencyUnlockAsync()
     {
@@ -478,7 +486,10 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         CloseAllWindowsCore();
         _requestSystemShutdown = null;
         _requestEmergencyUnlock = null;
+#if DEBUG
         _requestDevelopmentUnlock = null;
+#endif
+
         ProjectionFaulted = null;
         _disposed = true;
     }

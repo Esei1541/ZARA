@@ -14,9 +14,12 @@ public sealed class MainWindowScheduleBindingTests
     {
         var viewModel = new MainWindowViewModel(
             restartOnExitWhenUnlocked: true,
-            updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.CompletedTask,
-            requestDevelopmentUnlock: () => Task.CompletedTask);
+            updateRestartSetting: _ => Task.CompletedTask
+#if DEBUG
+            , requestLock: () => Task.CompletedTask,
+            requestDevelopmentUnlock: () => Task.CompletedTask
+#endif
+            );
         DailyUsageRestrictionViewModel wednesday = viewModel.WeekdayRestrictions.Single(
             day => day.DayOfWeek == DayOfWeek.Wednesday);
         wednesday.IsRestrictionEnabled = true;
@@ -119,9 +122,12 @@ public sealed class MainWindowScheduleBindingTests
     {
         using var viewModel = new MainWindowViewModel(
             restartOnExitWhenUnlocked: true,
-            updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.CompletedTask,
-            requestDevelopmentUnlock: () => Task.CompletedTask);
+            updateRestartSetting: _ => Task.CompletedTask
+#if DEBUG
+            , requestLock: () => Task.CompletedTask,
+            requestDevelopmentUnlock: () => Task.CompletedTask
+#endif
+            );
         var localNow = new DateTime(2026, 8, 10, 8, 30, 0);
         foreach (int dayOffset in new[] { -1, 0, 1 })
         {
@@ -173,9 +179,12 @@ public sealed class MainWindowScheduleBindingTests
         new(
             runtime,
             restartOnExitWhenUnlocked: true,
-            updateRestartSetting: _ => Task.CompletedTask,
-            requestLock: () => Task.CompletedTask,
-            requestDevelopmentUnlock: () => Task.CompletedTask);
+            updateRestartSetting: _ => Task.CompletedTask
+#if DEBUG
+            , requestLock: () => Task.CompletedTask,
+            requestDevelopmentUnlock: () => Task.CompletedTask
+#endif
+            );
 
     private static UsagePolicyRuntime CreateRuntime(UsagePolicySettings settings) =>
         new(

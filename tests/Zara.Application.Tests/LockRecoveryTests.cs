@@ -166,7 +166,9 @@ public sealed class LockRecoveryTests
 
     [TestMethod]
     [DataRow("regular")]
+#if DEBUG
     [DataRow("development")]
+#endif
     [DataRow("exit")]
     [DataRow("dispose")]
     public async Task UnlockExitAndDisposalCancelPendingRetryWithoutRelocking(string route)
@@ -184,9 +186,12 @@ public sealed class LockRecoveryTests
             case "regular":
                 await runtime.RequestUnlockAsync();
                 break;
+#if DEBUG
             case "development":
                 await runtime.RequestDevelopmentUnlockAsync();
                 break;
+#endif
+
             case "exit":
                 await runtime.PrepareForExitAsync();
                 break;

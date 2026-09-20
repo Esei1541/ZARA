@@ -4,6 +4,9 @@ using System.Windows.Controls;
 using Zara.Application.UsagePolicy;
 using Zara.Core.UsagePolicy;
 using Zara.Desktop.ViewModels;
+#if DEBUG
+using Button = System.Windows.Controls.Button;
+#endif
 
 namespace Zara.Desktop;
 
@@ -16,6 +19,27 @@ public partial class MainWindow : Window
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
         DataContext = _viewModel;
+#if DEBUG
+        ShellActions.Children.Add(new Button
+        {
+            MinWidth = 156,
+            Height = 36,
+            Padding = new Thickness(16, 0, 16, 0),
+            Command = _viewModel.StartLockDemoCommand,
+            Content = "오버레이 시연 시작",
+            FontWeight = FontWeights.SemiBold,
+        });
+        ShellActions.Children.Add(new Button
+        {
+            MinWidth = 156,
+            Height = 36,
+            Margin = new Thickness(12, 0, 0, 0),
+            Padding = new Thickness(16, 0, 16, 0),
+            Command = _viewModel.DevelopmentUnlockCommand,
+            Content = "잠금 해제(개발용)",
+            FontWeight = FontWeights.SemiBold,
+        });
+#endif
         _viewModel.NotificationRequested += OnNotificationRequested;
     }
 

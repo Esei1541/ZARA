@@ -150,6 +150,7 @@ public sealed class UsagePolicyRuntime : IDisposable
             cancellationToken);
     }
 
+#if DEBUG
     /// <summary>
     /// Disables every weekday restriction for development safety, even while settings are locked,
     /// preserving the configured times, emergency-unlock settings, and reservations.
@@ -176,6 +177,8 @@ public sealed class UsagePolicyRuntime : IDisposable
                     .ConfigureAwait(false);
             },
             cancellationToken);
+
+#endif
 
     /// <summary>
     /// Replaces only the emergency-unlock settings while preserving the latest weekday schedule

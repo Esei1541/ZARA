@@ -233,7 +233,7 @@ public sealed class SystemShutdownUseCaseTests
 
         Task shutdownRequest = useCase.RequestShutdownAsync();
         await shutdownStarted.Task;
-        await lockRuntime.RequestDevelopmentUnlockAsync();
+        await lockRuntime.RequestUnlockAsync();
         releaseShutdown.TrySetResult(true);
 
         InvalidOperationException actualException =
@@ -350,7 +350,7 @@ public sealed class SystemShutdownUseCaseTests
             lockRuntime,
             new RecordingShutdownPort());
         await useCase.RequestShutdownAsync();
-        await lockRuntime.RequestDevelopmentUnlockAsync();
+        await lockRuntime.RequestUnlockAsync();
 
         ShutdownCancellationRecoveryResult result =
             await useCase.HandleShutdownCancellationAsync();
@@ -552,7 +552,7 @@ public sealed class SystemShutdownUseCaseTests
         Guid requestId = Guid.NewGuid();
         await useCase.RequestShutdownAsync(requestId);
         await useCase.RestoreLockWhileShutdownPendingAsync(requestId);
-        await lockRuntime.RequestDevelopmentUnlockAsync();
+        await lockRuntime.RequestUnlockAsync();
 
         ShutdownCancellationRecoveryResult result =
             await useCase.HandleShutdownCancellationAsync(requestId);
@@ -570,7 +570,7 @@ public sealed class SystemShutdownUseCaseTests
         Guid requestId = Guid.NewGuid();
         await useCase.RequestShutdownAsync(requestId);
         await useCase.RestoreLockWhileShutdownPendingAsync(requestId);
-        await lockRuntime.RequestDevelopmentUnlockAsync();
+        await lockRuntime.RequestUnlockAsync();
 
         ShutdownCancellationRecoveryResult result =
             await useCase.HandleShutdownCancellationAsync(requestId);
@@ -758,8 +758,11 @@ public sealed class SystemShutdownUseCaseTests
                 new RuntimeState(LockState.Locked, OverlayProjectionState.Visible));
         }
 
+#if DEBUG
         public Task RequestDevelopmentUnlockAsync(CancellationToken cancellationToken = default)
             => RequestUnlockAsync(cancellationToken);
+
+#endif
 
         public Task RequestUnlockAsync(CancellationToken cancellationToken = default)
         {

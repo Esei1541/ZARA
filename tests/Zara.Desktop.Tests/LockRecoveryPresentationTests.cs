@@ -12,9 +12,11 @@ public sealed class LockRecoveryPresentationTests
     {
         var window = new OverlayWindow(
             () => Task.CompletedTask,
-            () => Task.CompletedTask,
-            () => Task.CompletedTask,
-            showDevelopmentControls: true);
+            () => Task.CompletedTask
+#if DEBUG
+            , () => Task.CompletedTask
+#endif
+            );
 
         try
         {

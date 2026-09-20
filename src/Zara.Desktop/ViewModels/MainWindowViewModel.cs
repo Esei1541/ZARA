@@ -43,15 +43,21 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     /// </summary>
     internal MainWindowViewModel(
         bool restartOnExitWhenUnlocked,
-        Func<bool, Task> updateRestartSetting,
-        Func<Task> requestLock,
-        Func<Task> requestDevelopmentUnlock)
+        Func<bool, Task> updateRestartSetting
+#if DEBUG
+        , Func<Task> requestLock,
+        Func<Task> requestDevelopmentUnlock
+#endif
+        )
     {
         _restartOnExitWhenUnlocked = restartOnExitWhenUnlocked;
         _updateRestartSetting =
             updateRestartSetting ?? throw new ArgumentNullException(nameof(updateRestartSetting));
+#if DEBUG
         ArgumentNullException.ThrowIfNull(requestLock);
         ArgumentNullException.ThrowIfNull(requestDevelopmentUnlock);
+#endif
+
         _synchronizationContext = SynchronizationContext.Current;
 
         WeekdayRestrictions = new ObservableCollection<DailyUsageRestrictionViewModel>(
@@ -83,10 +89,13 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             SaveEmergencyUnlockSettingsAsync,
             ReportEmergencyUnlockSettingsFailure,
             () => CanChangeUsagePolicySettings);
+#if DEBUG
         StartLockDemoCommand = new AsyncCommand(requestLock, ReportLockDemoFailure);
         DevelopmentUnlockCommand = new AsyncCommand(
             requestDevelopmentUnlock,
             ReportDevelopmentUnlockFailure);
+#endif
+
     }
 
     /// <summary>
@@ -95,10 +104,17 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     internal MainWindowViewModel(
         UsagePolicyRuntime usagePolicyRuntime,
         bool restartOnExitWhenUnlocked,
-        Func<bool, Task> updateRestartSetting,
-        Func<Task> requestLock,
-        Func<Task> requestDevelopmentUnlock)
-        : this(restartOnExitWhenUnlocked, updateRestartSetting, requestLock, requestDevelopmentUnlock)
+        Func<bool, Task> updateRestartSetting
+#if DEBUG
+        , Func<Task> requestLock,
+        Func<Task> requestDevelopmentUnlock
+#endif
+        )
+        : this(restartOnExitWhenUnlocked, updateRestartSetting
+#if DEBUG
+            , requestLock, requestDevelopmentUnlock
+#endif
+            )
     {
         _usagePolicyRuntime = usagePolicyRuntime ??
             throw new ArgumentNullException(nameof(usagePolicyRuntime));
@@ -131,9 +147,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>Gets the command that persists only the emergency-unlock settings.</summary>
     public ICommand SaveEmergencyUnlockSettingsCommand => _saveEmergencyUnlockSettingsCommand;
 
+#if DEBUG
     public ICommand StartLockDemoCommand { get; }
 
     public ICommand DevelopmentUnlockCommand { get; }
+
+#endif
 
     /// <summary>Gets whether the time-rule runtime was supplied by the App composition root.</summary>
     public bool HasUsagePolicyRuntime => _usagePolicyRuntime is not null;
@@ -511,6 +530,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         };
     }
 
+#if DEBUG
     private void ReportLockDemoFailure(Exception _) =>
         RequestNotification(
             "잠금 화면 시연",
@@ -522,6 +542,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             "잠금 해제(개발용)",
             "잠금을 해제하지 못했습니다. 잠시 후 다시 시도하세요.",
             isError: true);
+
+#endif
 
     private void RequestNotification(string message, bool isError) =>
         RequestNotification("설정 저장", message, isError);
