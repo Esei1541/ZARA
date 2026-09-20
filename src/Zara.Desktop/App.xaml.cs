@@ -50,7 +50,6 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private DesktopRestartSettings _restartSettings = DesktopRestartSettings.Default;
     private bool _lockConditionRequired;
     private bool _exitRequestInProgress;
-    private bool _systemShutdownRequestInProgress;
     private bool _systemEventsSubscribed;
     private bool _externalActivationRequested;
     private CancellationTokenSource? _systemShutdownWatchdog;
@@ -58,6 +57,8 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private int _disposeState;
 
     internal bool IsShuttingDown { get; private set; }
+
+    private bool SystemShutdownRequestInProgress => _shutdownPresentation.IsPending;
 
     internal void AttachActivationChannel(WindowsDesktopActivationChannel activationChannel)
     {
@@ -174,10 +175,12 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             ShowDevelopmentSafetyControls);
         _lockInputPort = new WindowsLockInputPort(_supervisionConnection);
         _lockRuntime = new LockRuntimeUseCase(_overlayPort, _lockInputPort);
+        _lockRuntime.RecoveryStateChanged += OnLockRecoveryStateChanged;
         _systemShutdown = new SystemShutdownUseCase(
             _lockRuntime,
             new WindowsSystemShutdownPort());
         _shutdownCancellationWatchdog = new ShutdownCancellationWatchdog(_systemShutdown);
+        InitializeShutdownNotifications();
         _overlayPort.SetSystemShutdownHandler(RequestSystemShutdownAsync);
         _overlayPort.SetEmergencyUnlockHandler(RequestEmergencyUnlockAsync);
         _overlayPort.SetDevelopmentUnlockHandler(RequestDevelopmentUnlockAsync);
@@ -340,8 +343,13 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         {
             await runtime.RequestLockAsync().ConfigureAwait(true);
             _ = await continuity
-                .PublishOverlayProjectionAsync(OverlayProjectionState.Visible)
+                .PublishOverlayProjectionAsync(runtime.CurrentState.OverlayProjection)
                 .ConfigureAwait(true);
+        }
+        catch (Exception exception) when (runtime.CurrentRecovery.IsRecovering)
+        {
+            Trace.TraceError("Lock effects are awaiting automatic recovery: {0}", exception);
+            await TryPublishOverlayProjectionAsync(OverlayProjectionState.Unknown).ConfigureAwait(true);
         }
         catch
         {
@@ -643,7 +651,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
 
     private async Task RequestSystemShutdownAsync()
     {
-        if (_exitRequestInProgress || _systemShutdownRequestInProgress || IsShuttingDown)
+        if (_exitRequestInProgress || SystemShutdownRequestInProgress || IsShuttingDown || _sessionEnding)
         {
             return;
         }
@@ -653,31 +661,34 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         WpfLockOverlayPort overlayPort = _overlayPort ??
             throw new InvalidOperationException("The overlay port is not initialized.");
 
-        _systemShutdownRequestInProgress = true;
         overlayPort.SetSystemShutdownEnabled(isEnabled: false);
-        bool watchdogStarted = false;
+        Guid requestId = Guid.NewGuid();
+        _shutdownPresentation.Begin(requestId);
+        _shutdownNotifications.BeginRequest(requestId);
+        string? failureMessage = null;
+        LockIntentSnapshot? failureIntent = null;
         try
         {
-            Guid requestId = Guid.NewGuid();
             await shutdown.RequestShutdownAsync(requestId).ConfigureAwait(true);
-            StartSystemShutdownWatchdog(requestId);
-            watchdogStarted = true;
-            await TryPublishOverlayProjectionAsync(OverlayProjectionState.Hidden)
-                .ConfigureAwait(true);
+            if (_shutdownPresentation.CanStartWatchdog(requestId))
+            {
+                StartSystemShutdownWatchdog(requestId);
+                await PublishCurrentProjectionBestEffortAsync().ConfigureAwait(true);
+            }
         }
         catch (Exception exception)
         {
             Trace.TraceError("The system shutdown request failed: {0}", exception);
+            failureIntent = GetLockRuntime().CurrentIntent;
             await PublishCurrentProjectionBestEffortAsync().ConfigureAwait(true);
-            overlayPort.SetSystemShutdownEnabled(isEnabled: true);
-            throw;
+            CompleteShutdownAttempt(requestId);
+            failureMessage = "PC를 종료하지 못했습니다.";
         }
-        finally
+
+        if (failureMessage is not null && failureIntent is not null && !IsShuttingDown &&
+            _shutdownPresentation.CanShowResult(requestId, failureIntent, GetLockRuntime().CurrentIntent))
         {
-            if (!watchdogStarted)
-            {
-                _systemShutdownRequestInProgress = false;
-            }
+            ShowShutdownResult(failureMessage);
         }
     }
 
@@ -693,7 +704,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         Guid requestId,
         CancellationTokenSource cancellation)
     {
-#pragma warning disable CA1031 // A failed watchdog must still re-arm the lock UI best effort.
+#pragma warning disable CA1031 // Watchdog failures are logged; adapter recovery belongs to the runtime.
         try
         {
             ShutdownCancellationWatchdog watchdog = _shutdownCancellationWatchdog ??
@@ -715,10 +726,6 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         catch (Exception exception)
         {
             Trace.TraceError("The system shutdown cancellation watchdog failed: {0}", exception);
-            if (_lockConditionRequired && !IsShuttingDown)
-            {
-                await RestoreRequiredOverlayBestEffortAsync().ConfigureAwait(true);
-            }
         }
         finally
         {
@@ -726,10 +733,11 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             {
                 _systemShutdownWatchdog = null;
                 cancellation.Dispose();
-                if (!IsShuttingDown)
+                if (!IsShuttingDown && _shutdownPresentation.CanStartWatchdog(requestId))
                 {
-                    _systemShutdownRequestInProgress = false;
-                    _overlayPort?.SetSystemShutdownEnabled(isEnabled: true);
+                    // Process survival is not a confirmed cancellation. Keep the request pending
+                    // until Windows reports an end-session result, without showing a failure dialog.
+                    _overlayPort?.SetSystemShutdownEnabled(isEnabled: false);
                 }
             }
         }
@@ -751,7 +759,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
 
     private async Task RequestExitFromTrayAsync()
     {
-        if (_exitRequestInProgress || _systemShutdownRequestInProgress || IsShuttingDown)
+        if (_exitRequestInProgress || IsShuttingDown || _sessionEnding)
         {
             return;
         }
@@ -906,7 +914,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
 
     private void ThrowIfShuttingDown()
     {
-        if (IsShuttingDown || _exitRequestInProgress || _systemShutdownRequestInProgress)
+        if (IsShuttingDown || _exitRequestInProgress || _sessionEnding)
         {
             throw new InvalidOperationException("The desktop process is shutting down.");
         }
@@ -921,6 +929,13 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
 
         CancelSystemShutdownWatchdog();
         UnsubscribeUsagePolicyNotifications();
+        DisposeRecoveryNotifications();
+
+        if (_lockRuntime is not null)
+        {
+            _lockRuntime.RecoveryStateChanged -= OnLockRecoveryStateChanged;
+            _lockRuntime.Dispose();
+        }
 
         _lockInputPort?.Dispose();
         _lockInputPort = null;

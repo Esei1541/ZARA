@@ -27,10 +27,13 @@ public interface ILockRuntimeUseCase
     LockIntentSnapshot CurrentIntent { get; }
 
     /// <summary>
-    /// Requests the default lock and waits for its overlay effect to finish.
+    /// Requests the default lock. During recovery, repeated requests preserve the retry deadline.
     /// </summary>
     /// <param name="cancellationToken">Cancels the pending request.</param>
-    /// <returns>A task that completes after all effects produced by the request finish.</returns>
+    /// <returns>
+    /// A task that completes after this attempt finishes or an existing recovery accepts the intent.
+    /// The current state distinguishes a confirmed projection from effects still awaiting recovery.
+    /// </returns>
     Task RequestLockAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -57,7 +60,8 @@ public interface ILockRuntimeUseCase
     /// </param>
     /// <param name="cancellationToken">Cancels the pending conditional request.</param>
     /// <returns>
-    /// <see langword="true"/> when the restoration request was accepted and its effects completed;
+    /// <see langword="true"/> when the restoration intent was accepted; the current state indicates
+    /// whether its effects completed or are awaiting an existing recovery;
     /// <see langword="false"/> when a newer intent made the restoration obsolete.
     /// </returns>
     Task<bool> RestoreLockIfIntentRevisionAsync(

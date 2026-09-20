@@ -47,7 +47,7 @@ public sealed class ShutdownCancellationWatchdog
 
         await _delay(DefaultDelay, cancellationToken).ConfigureAwait(false);
         return await _shutdownUseCase
-            .HandleShutdownCancellationAsync(requestId)
+            .RestoreLockWhileShutdownPendingAsync(requestId)
             .ConfigureAwait(false);
     }
 }

@@ -233,7 +233,7 @@ public sealed class LockRuntimeUseCaseTests
     }
 
     [TestMethod]
-    public async Task RequestLockAsyncAfterShowFailureRetriesExplicitRequest()
+    public async Task RequestLockAsyncAfterShowFailureRetriesExplicitRequestOnlyAfterOneMinute()
     {
         var attempt = 0;
         var expectedException = new InvalidOperationException("Show failed once.");
@@ -243,10 +243,20 @@ public sealed class LockRuntimeUseCaseTests
                 ? Task.FromException(expectedException)
                 : Task.CompletedTask,
         };
-        using var useCase = new LockRuntimeUseCase(port, new RecordingInputPort());
+        var clock = new RecoveryTestClock();
+        using var useCase = new LockRuntimeUseCase(
+            port,
+            new RecordingInputPort(),
+            clock,
+            static (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token));
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(
             () => useCase.RequestLockAsync());
 
+        await useCase.RequestLockAsync();
+        Assert.AreEqual(1, port.ShowCallCount);
+        AssertState(useCase, LockState.Locked, OverlayProjectionState.Unknown);
+
+        clock.Advance(TimeSpan.FromMinutes(1));
         await useCase.RequestLockAsync();
 
         Assert.AreEqual(2, port.ShowCallCount);

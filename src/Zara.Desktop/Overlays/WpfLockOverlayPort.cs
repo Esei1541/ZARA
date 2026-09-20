@@ -17,10 +17,14 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     private readonly bool _showDevelopmentSafetyControls;
     private readonly Dictionary<string, OverlayWindow> _windows =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _failedDevices = new(StringComparer.OrdinalIgnoreCase);
     private Func<Task>? _requestSystemShutdown;
     private Func<Task>? _requestEmergencyUnlock;
     private Func<Task>? _requestDevelopmentUnlock;
     private bool _emergencyUnlockEnabled;
+    private bool _systemShutdownEnabled = true;
+    private bool _recoveryActive;
+    private bool _topologyCaptureFailed;
     private bool _maintainVisibleProjection;
     private bool _topologySubscribed;
     private bool _disposed;
@@ -79,11 +83,29 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
     internal void SetSystemShutdownEnabled(bool isEnabled)
     {
         ThrowIfDisposed();
+        _systemShutdownEnabled = isEnabled;
 
         foreach (OverlayWindow window in _windows.Values)
         {
             window.SetSystemShutdownEnabled(isEnabled);
         }
+    }
+
+    internal void SetRecoveryActive(bool isActive)
+    {
+        ThrowIfDisposed();
+        _recoveryActive = isActive;
+
+        foreach (OverlayWindow window in _windows.Values)
+        {
+            window.SetRecoveryActive(isActive);
+        }
+    }
+
+    internal Window? GetDialogOwner()
+    {
+        ThrowIfDisposed();
+        return _windows.Values.FirstOrDefault(window => window.IsVisible);
     }
 
     internal void SetEmergencyUnlockEnabled(bool isEnabled)
@@ -130,31 +152,7 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
             SubscribeTopology();
         }
 
-        try
-        {
-            ReconcileCore();
-        }
-        catch (Exception projectionException)
-        {
-            _maintainVisibleProjection = false;
-            UnsubscribeTopology();
-
-#pragma warning disable CA1031 // Preserve both projection and best-effort cleanup failures.
-            try
-            {
-                CloseAllWindowsCore();
-            }
-            catch (Exception cleanupException)
-            {
-                throw new AggregateException(
-                    "Overlay projection and cleanup both failed.",
-                    projectionException,
-                    cleanupException);
-            }
-#pragma warning restore CA1031
-
-            throw;
-        }
+        ReconcileCore(retryFailures: true);
     }
 
     private void HideAllCore()
@@ -162,51 +160,133 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         ThrowIfDisposed();
         _maintainVisibleProjection = false;
         UnsubscribeTopology();
+        _failedDevices.Clear();
+        _topologyCaptureFailed = false;
         CloseAllWindowsCore();
     }
 
-    private void ReconcileCore()
+    private void ReconcileCore(bool retryFailures)
     {
-        if (!_maintainVisibleProjection)
+        if (!_maintainVisibleProjection || (_topologyCaptureFailed && !retryFailures))
         {
             return;
         }
 
-        var currentDisplays = _displayTopology
-            .Capture()
-            .ToDictionary(snapshot => snapshot.DeviceName, StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, DisplaySnapshot> currentDisplays;
+#pragma warning disable CA1031 // Report capture failure while retaining already visible overlays.
+        try
+        {
+            currentDisplays = _displayTopology
+                .Capture()
+                .ToDictionary(snapshot => snapshot.DeviceName, StringComparer.OrdinalIgnoreCase);
+            _topologyCaptureFailed = false;
+        }
+        catch (Exception exception)
+        {
+            _topologyCaptureFailed = true;
+            throw new AggregateException("The display topology could not be captured.", exception);
+        }
+#pragma warning restore CA1031
+
+        ReconcileDisplays(
+            currentDisplays,
+            _windows.Keys.ToArray(),
+            _failedDevices,
+            retryFailures,
+            ProjectDisplay,
+            CloseDisplay);
+    }
+
+    // Keep selection and failure isolation testable without showing native lock windows.
+    internal static void ReconcileDisplays(
+        IReadOnlyDictionary<string, DisplaySnapshot> currentDisplays,
+        IReadOnlyCollection<string> trackedDevices,
+        HashSet<string> failedDevices,
+        bool retryFailures,
+        Action<DisplaySnapshot> projectDisplay,
+        Action<string> closeDisplay)
+    {
+        List<Exception>? failures = null;
 
         foreach ((string deviceName, DisplaySnapshot display) in currentDisplays)
         {
-            if (!_windows.TryGetValue(deviceName, out OverlayWindow? window))
+            if (!retryFailures && failedDevices.Contains(deviceName))
             {
-                window = CreateOverlayWindow(deviceName);
-                _windows.Add(deviceName, window);
+                continue;
             }
 
-            PositionWindow(window, display.PixelBounds);
+#pragma warning disable CA1031 // A failed display must not discard working lock surfaces.
+            try
+            {
+                projectDisplay(display);
+                failedDevices.Remove(deviceName);
+            }
+            catch (Exception exception)
+            {
+                failedDevices.Add(deviceName);
+                failures ??= [];
+                failures.Add(new InvalidOperationException(
+                    $"The lock overlay for display '{deviceName}' could not be projected.", exception));
+            }
+#pragma warning restore CA1031
         }
 
-        string[] removedDevices = _windows.Keys
+        string[] removedDevices = trackedDevices
             .Where(deviceName => !currentDisplays.ContainsKey(deviceName))
             .ToArray();
 
         foreach (string deviceName in removedDevices)
         {
-            OverlayWindow window = _windows[deviceName];
-            window.CloseFromCoordinator();
-
-            if (_windows.TryGetValue(deviceName, out OverlayWindow? trackedWindow) &&
-                ReferenceEquals(trackedWindow, window))
+            if (!retryFailures && failedDevices.Contains(deviceName))
             {
-                _windows.Remove(deviceName);
+                continue;
             }
+
+#pragma warning disable CA1031 // Attempt cleanup for each removed display independently.
+            try
+            {
+                closeDisplay(deviceName);
+                failedDevices.Remove(deviceName);
+            }
+            catch (Exception exception)
+            {
+                failedDevices.Add(deviceName);
+                failures ??= [];
+                failures.Add(exception);
+            }
+#pragma warning restore CA1031
         }
 
-        if (_windows.Count != currentDisplays.Count)
+        failedDevices.RemoveWhere(deviceName =>
+            !currentDisplays.ContainsKey(deviceName) &&
+            !trackedDevices.Contains(deviceName, StringComparer.OrdinalIgnoreCase));
+
+        if (failures is not null)
         {
-            throw new InvalidOperationException(
-                "The overlay projection does not match the current display topology.");
+            throw new AggregateException("One or more lock overlays could not be updated.", failures);
+        }
+    }
+
+    private void ProjectDisplay(DisplaySnapshot display)
+    {
+        if (!_windows.TryGetValue(display.DeviceName, out OverlayWindow? window))
+        {
+            window = CreateOverlayWindow(display.DeviceName);
+            _windows.Add(display.DeviceName, window);
+        }
+
+        PositionWindow(window, display.PixelBounds);
+    }
+
+    private void CloseDisplay(string deviceName)
+    {
+        OverlayWindow window = _windows[deviceName];
+        window.CloseFromCoordinator();
+
+        if (_windows.TryGetValue(deviceName, out OverlayWindow? trackedWindow) &&
+            ReferenceEquals(trackedWindow, window))
+        {
+            _windows.Remove(deviceName);
         }
     }
 
@@ -220,9 +300,11 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         {
             // Direct ordinary typing to the first lock surface, not the previously active app.
             // Additional monitors must not take focus from an open emergency-unlock dialog.
-            ShowActivated = _windows.Count == 0,
+            ShowActivated = !_windows.Values.Any(existingWindow => existingWindow.IsVisible),
         };
         window.SetEmergencyUnlockEnabled(_emergencyUnlockEnabled);
+        window.SetSystemShutdownEnabled(_systemShutdownEnabled);
+        window.SetRecoveryActive(_recoveryActive);
         window.DpiChanged += (_, _) => ScheduleReconcile();
         window.Loaded += (_, _) => ScheduleReconcile();
         window.ContentRendered += (_, _) => ScheduleReconcile();
@@ -327,7 +409,7 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
 #pragma warning disable CA1031 // A topology callback cannot propagate to its original event source.
         try
         {
-            ReconcileCore();
+            ReconcileCore(retryFailures: false);
         }
         catch (Exception exception)
         {

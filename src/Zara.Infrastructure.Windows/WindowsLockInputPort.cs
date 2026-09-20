@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using Zara.Application.Locking;
 
 namespace Zara.Infrastructure.Windows;
@@ -13,6 +14,7 @@ public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
     private IShellShortcutHook? _hook;
     private bool _stopping;
     private bool _restrictionRequested;
+    private bool _restrictionEnabled;
     private int _disposed;
 
     /// <summary>
@@ -46,32 +48,34 @@ public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
         try
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
-            if (_hook is not null)
-            {
-                if (!_stopping && !_hook.Stopped.IsCompleted)
-                {
-                    await RestrictTaskManagerAsync().ConfigureAwait(false);
-                    return;
-                }
-
-                await StopCoreAsync().ConfigureAwait(false);
-            }
-
-            IShellShortcutHook hook = _createHook();
-            hook.Start();
-            _hook = hook;
-            // Once started, wait for a definite result. Cancelling this wait could orphan a hook.
+#pragma warning disable CA1031 // Try each independent lock effect while preserving every failure.
+            Exception? hookFailure = null;
             try
             {
-                await hook.Started.ConfigureAwait(false);
+                await EnableHookAsync().ConfigureAwait(false);
             }
-            catch
+            catch (Exception exception)
             {
-                await StopCoreAsync().ConfigureAwait(false);
-                throw;
+                hookFailure = exception;
             }
 
-            await RestrictTaskManagerAsync().ConfigureAwait(false);
+            try
+            {
+                await RestrictTaskManagerAsync().ConfigureAwait(false);
+            }
+            catch (Exception restrictionFailure) when (hookFailure is not null)
+            {
+                throw new AggregateException(
+                    "Shell shortcut suppression and Task Manager restriction both failed.",
+                    hookFailure,
+                    restrictionFailure);
+            }
+#pragma warning restore CA1031
+
+            if (hookFailure is not null)
+            {
+                ExceptionDispatchInfo.Capture(hookFailure).Throw();
+            }
         }
         finally
         {
@@ -117,13 +121,41 @@ public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
         GC.SuppressFinalize(this);
     }
 
+    private async Task EnableHookAsync()
+    {
+        if (_hook is not null)
+        {
+            if (!_stopping && !_hook.Stopped.IsCompleted)
+            {
+                return;
+            }
+
+            await StopCoreAsync().ConfigureAwait(false);
+        }
+
+        IShellShortcutHook hook = _createHook();
+        hook.Start();
+        _hook = hook;
+        // Once started, wait for a definite result. Cancelling this wait could orphan a hook.
+        try
+        {
+            await hook.Started.ConfigureAwait(false);
+        }
+        catch
+        {
+            await StopCoreAsync().ConfigureAwait(false);
+            throw;
+        }
+    }
+
     private async Task RestrictTaskManagerAsync()
     {
-        if (_taskManagerRestriction is not null)
+        if (!_restrictionEnabled && _taskManagerRestriction is not null)
         {
             // A failed acknowledgement can still follow a successful Windows write.
             _restrictionRequested = true;
             await _taskManagerRestriction.EnableAsync(CancellationToken.None).ConfigureAwait(false);
+            _restrictionEnabled = true;
         }
     }
 
@@ -137,6 +169,8 @@ public sealed class WindowsLockInputPort : ILockInputPort, IDisposable
         {
             if (_restrictionRequested && _taskManagerRestriction is not null)
             {
+                // A failed restore may already have removed the restriction.
+                _restrictionEnabled = false;
                 await _taskManagerRestriction.DisableAsync(CancellationToken.None).ConfigureAwait(false);
                 _restrictionRequested = false;
             }

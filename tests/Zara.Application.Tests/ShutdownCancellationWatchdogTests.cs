@@ -25,7 +25,7 @@ public sealed class ShutdownCancellationWatchdogTests
 
         Assert.AreEqual(TimeSpan.FromMilliseconds(250), observedDelay);
         Assert.IsTrue(ShutdownCancellationWatchdog.DefaultDelay <= TimeSpan.FromMilliseconds(500));
-        Assert.AreEqual(requestId, useCase.CancellationRequestId);
+        Assert.AreEqual(requestId, useCase.SafetyRecoveryRequestId);
         Assert.AreEqual(ShutdownCancellationRecoveryResult.LockRestored, result);
     }
 
@@ -44,12 +44,12 @@ public sealed class ShutdownCancellationWatchdogTests
         cancellation.Cancel();
 
         await Assert.ThrowsAsync<OperationCanceledException>(() => recovery);
-        Assert.AreEqual(Guid.Empty, useCase.CancellationRequestId);
+        Assert.AreEqual(Guid.Empty, useCase.SafetyRecoveryRequestId);
     }
 
     private sealed class FakeShutdownUseCase : ISystemShutdownUseCase
     {
-        public Guid CancellationRequestId { get; private set; }
+        public Guid SafetyRecoveryRequestId { get; private set; }
 
         public Task RequestShutdownAsync(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
@@ -63,9 +63,11 @@ public sealed class ShutdownCancellationWatchdogTests
             throw new NotSupportedException();
 
         public Task<ShutdownCancellationRecoveryResult> HandleShutdownCancellationAsync(
-            Guid requestId)
+            Guid requestId) => throw new NotSupportedException();
+
+        public Task<ShutdownCancellationRecoveryResult> RestoreLockWhileShutdownPendingAsync(Guid requestId)
         {
-            CancellationRequestId = requestId;
+            SafetyRecoveryRequestId = requestId;
             return Task.FromResult(ShutdownCancellationRecoveryResult.LockRestored);
         }
     }

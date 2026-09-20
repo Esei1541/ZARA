@@ -168,6 +168,146 @@ public sealed class WindowsLockInputPortTests
     }
 
     [TestMethod]
+    public async Task RepeatedEnableKeepsSuccessfulRestrictionUntilUnlock()
+    {
+        var restriction = new RecordingRestriction();
+        using var port = new WindowsLockInputPort(() => new RecordingHook(), restriction);
+
+        await port.EnableAsync(CancellationToken.None);
+        await port.EnableAsync(CancellationToken.None);
+        Assert.AreEqual(1, restriction.Applies);
+        Assert.AreEqual(0, restriction.Restores);
+
+        await port.DisableAsync(CancellationToken.None);
+        await port.EnableAsync(CancellationToken.None);
+        Assert.AreEqual(2, restriction.Applies);
+        Assert.AreEqual(1, restriction.Restores);
+    }
+
+    [TestMethod]
+    public async Task FailedRestrictionRetriesWithoutRestartingSuccessfulHook()
+    {
+        var restriction = new RecordingRestriction { FailApply = true };
+        var hook = new RecordingHook();
+        using var port = new WindowsLockInputPort(() => hook, restriction);
+
+        await Assert.ThrowsExactlyAsync<IOException>(() => port.EnableAsync(CancellationToken.None));
+        Assert.AreEqual(1, hook.Starts);
+        Assert.AreEqual(0, hook.Stops);
+        Assert.AreEqual(0, restriction.Restores);
+
+        restriction.FailApply = false;
+        await port.EnableAsync(CancellationToken.None);
+        await port.EnableAsync(CancellationToken.None);
+
+        Assert.AreEqual(2, restriction.Applies);
+        Assert.AreEqual(1, hook.Starts);
+        Assert.AreEqual(0, hook.Stops);
+    }
+
+    [TestMethod]
+    public async Task FailedHookStillAppliesRestrictionAndRetriesOnlyHook()
+    {
+        var failed = new RecordingHook { CompleteStart = false };
+        failed.StartedSource.SetException(new InvalidOperationException("Install failed."));
+        var replacement = new RecordingHook();
+        var restriction = new RecordingRestriction();
+        int created = 0;
+        using var port = new WindowsLockInputPort(() => created++ == 0 ? failed : replacement, restriction);
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => port.EnableAsync(CancellationToken.None));
+        Assert.AreEqual(1, failed.Stops);
+        Assert.AreEqual(1, restriction.Applies);
+        Assert.AreEqual(0, restriction.Restores);
+
+        await port.EnableAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, replacement.Starts);
+        Assert.AreEqual(1, restriction.Applies);
+        Assert.AreEqual(0, restriction.Restores);
+    }
+
+    [TestMethod]
+    public async Task HookCreationFailureStillAppliesAndRestoresRestriction()
+    {
+        var restriction = new RecordingRestriction();
+        using var port = new WindowsLockInputPort(
+            () => throw new InvalidOperationException("Hook could not be created."),
+            restriction);
+
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => port.EnableAsync(CancellationToken.None));
+        Assert.AreEqual(1, restriction.Applies);
+        await port.DisableAsync(CancellationToken.None);
+        Assert.AreEqual(1, restriction.Restores);
+    }
+
+    [TestMethod]
+    public async Task BothEnableFailuresAreReportedAndUnacknowledgedRestrictionIsRestored()
+    {
+        var failed = new RecordingHook { CompleteStart = false };
+        failed.StartedSource.SetException(new InvalidOperationException("Install failed."));
+        var restriction = new RecordingRestriction { FailApply = true };
+        using var port = new WindowsLockInputPort(() => failed, restriction);
+
+        AggregateException failure = await Assert.ThrowsExactlyAsync<AggregateException>(
+            () => port.EnableAsync(CancellationToken.None));
+
+        Assert.HasCount(2, failure.InnerExceptions);
+        Assert.IsInstanceOfType<InvalidOperationException>(failure.InnerExceptions[0]);
+        Assert.IsInstanceOfType<IOException>(failure.InnerExceptions[1]);
+        await port.DisableAsync(CancellationToken.None);
+        Assert.AreEqual(1, restriction.Restores);
+    }
+
+    [TestMethod]
+    public async Task FailedRestoreDoesNotReuseEarlierRestrictionSuccess()
+    {
+        var restriction = new RecordingRestriction { FailRestore = true };
+        using var port = new WindowsLockInputPort(() => new RecordingHook(), restriction);
+        await port.EnableAsync(CancellationToken.None);
+
+        await Assert.ThrowsExactlyAsync<IOException>(() => port.DisableAsync(CancellationToken.None));
+        await port.EnableAsync(CancellationToken.None);
+
+        Assert.AreEqual(2, restriction.Applies);
+        restriction.FailRestore = false;
+        await port.DisableAsync(CancellationToken.None);
+        Assert.AreEqual(2, restriction.Restores);
+    }
+
+    [TestMethod]
+    public async Task StoppedHookIsReplacedWithoutReapplyingSuccessfulRestriction()
+    {
+        var stopped = new RecordingHook();
+        var replacement = new RecordingHook();
+        var restriction = new RecordingRestriction();
+        int created = 0;
+        using var port = new WindowsLockInputPort(() => created++ == 0 ? stopped : replacement, restriction);
+        await port.EnableAsync(CancellationToken.None);
+        stopped.StoppedSource.SetResult();
+
+        await port.EnableAsync(CancellationToken.None);
+
+        Assert.AreEqual(1, replacement.Starts);
+        Assert.AreEqual(1, restriction.Applies);
+        Assert.AreEqual(0, restriction.Restores);
+    }
+
+    [TestMethod]
+    public async Task FailedPolicyAcknowledgementStillRestoresOnDispose()
+    {
+        var restriction = new RecordingRestriction { FailApply = true };
+        var hook = new RecordingHook();
+        using var port = new WindowsLockInputPort(() => hook, restriction);
+
+        await Assert.ThrowsExactlyAsync<IOException>(() => port.EnableAsync(CancellationToken.None));
+        port.Dispose();
+
+        Assert.AreEqual(1, hook.Stops);
+        Assert.AreEqual(1, restriction.Restores);
+    }
+
+    [TestMethod]
     public async Task HookStopFailureStillRestoresPolicyAndPolicyFailureCanBeRetried()
     {
         var restriction = new RecordingRestriction();
@@ -189,7 +329,7 @@ public sealed class WindowsLockInputPortTests
     {
         public int Applies { get; private set; }
         public int Restores { get; private set; }
-        public bool FailApply { get; init; }
+        public bool FailApply { get; set; }
         public bool FailRestore { get; set; }
 
         public Task EnableAsync(CancellationToken cancellationToken)

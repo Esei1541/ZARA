@@ -71,5 +71,13 @@
         </WrapPanel>
       </StackPanel>
     </Border>
+    <TextBlock x:Name="RecoveryStatus"
+               Margin="24"
+               HorizontalAlignment="Right"
+               VerticalAlignment="Bottom"
+               Foreground="#FFD1D6DE"
+               FontSize="16"
+               Text="잠금 오류 복원 중..."
+               Visibility="Collapsed" />
   </Grid>
 </Window>

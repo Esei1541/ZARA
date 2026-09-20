@@ -24,6 +24,11 @@ public enum ShutdownCancellationRecoveryResult
     /// A newer explicit lock or safety-unlock intent superseded the stale recovery request.
     /// </summary>
     SupersededByNewerIntent,
+
+    /// <summary>
+    /// The previous lock intent was restored, but failed effects are still being recovered.
+    /// </summary>
+    RecoveryPending,
 }
 
 /// <summary>
@@ -62,4 +67,11 @@ public interface ISystemShutdownUseCase
     /// </summary>
     /// <param name="requestId">The identity issued with the shutdown request.</param>
     Task<ShutdownCancellationRecoveryResult> HandleShutdownCancellationAsync(Guid requestId);
+
+    /// <summary>
+    /// Restores the previous lock while shutdown is still pending without treating process
+    /// survival as cancellation or allowing another shutdown request before a terminal signal.
+    /// </summary>
+    /// <param name="requestId">The identity issued with the shutdown request.</param>
+    Task<ShutdownCancellationRecoveryResult> RestoreLockWhileShutdownPendingAsync(Guid requestId);
 }

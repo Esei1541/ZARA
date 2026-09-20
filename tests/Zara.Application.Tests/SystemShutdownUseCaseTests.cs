@@ -455,6 +455,184 @@ public sealed class SystemShutdownUseCaseTests
     }
 
     [TestMethod]
+    public async Task SafetyRecoveryDoesNotTreatPendingShutdownAsCancellation()
+    {
+        var lockRuntime = new RecordingLockRuntime(initiallyLocked: true);
+        var shutdownPort = new RecordingShutdownPort();
+        using var useCase = new SystemShutdownUseCase(lockRuntime, shutdownPort);
+        Guid requestId = Guid.NewGuid();
+        await useCase.RequestShutdownAsync(requestId);
+
+        ShutdownCancellationRecoveryResult safetyResult =
+            await useCase.RestoreLockWhileShutdownPendingAsync(requestId);
+        await useCase.RequestShutdownAsync(Guid.NewGuid());
+        ShutdownCancellationRecoveryResult confirmedResult =
+            await useCase.HandleShutdownCancellationAsync(requestId);
+        await useCase.RequestShutdownAsync(Guid.NewGuid());
+
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.LockRestored, safetyResult);
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.LockRestored, confirmedResult);
+        Assert.AreEqual(1, lockRuntime.ConditionalRestoreCallCount);
+        Assert.AreEqual(2, shutdownPort.RequestShutdownCallCount);
+    }
+
+    [TestMethod]
+    public async Task FailedSafetyRestorePreservesOwnedIntentAndReportsPendingOnConfirmedCancellation()
+    {
+        var lockRuntime = new RecordingLockRuntime(initiallyLocked: true)
+        {
+            RequestLockOperation = _ => throw new InvalidOperationException("Overlay failed."),
+        };
+        var shutdownPort = new RecordingShutdownPort();
+        using var useCase = new SystemShutdownUseCase(lockRuntime, shutdownPort);
+        Guid requestId = Guid.NewGuid();
+        await useCase.RequestShutdownAsync(requestId);
+
+        ShutdownCancellationRecoveryResult safetyResult =
+            await useCase.RestoreLockWhileShutdownPendingAsync(requestId);
+        ShutdownCancellationRecoveryResult confirmedResult =
+            await useCase.HandleShutdownCancellationAsync(requestId);
+        await useCase.RequestShutdownAsync(Guid.NewGuid());
+
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.RecoveryPending, safetyResult);
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.RecoveryPending, confirmedResult);
+        Assert.AreEqual(1, lockRuntime.ConditionalRestoreCallCount);
+        Assert.AreEqual(2, shutdownPort.RequestShutdownCallCount);
+    }
+
+    [TestMethod]
+    public async Task FailedRestoreOnFirstConfirmedCancellationReportsPending()
+    {
+        var lockRuntime = new RecordingLockRuntime(initiallyLocked: true)
+        {
+            RequestLockOperation = _ => throw new InvalidOperationException("Overlay failed."),
+        };
+        using var useCase = new SystemShutdownUseCase(lockRuntime, new RecordingShutdownPort());
+        Guid requestId = Guid.NewGuid();
+        await useCase.RequestShutdownAsync(requestId);
+
+        ShutdownCancellationRecoveryResult result =
+            await useCase.HandleShutdownCancellationAsync(requestId);
+
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.RecoveryPending, result);
+        Assert.AreEqual(LockState.Locked, lockRuntime.CurrentIntent.DesiredLock);
+        Assert.AreEqual(1, lockRuntime.ConditionalRestoreCallCount);
+    }
+
+    [TestMethod]
+    public async Task RuntimeRecoveryCompletesWithoutRepeatingTheOwnedRestoreIntent()
+    {
+        var lockRuntime = new RecordingLockRuntime(initiallyLocked: true)
+        {
+            RequestLockOperation = _ => throw new InvalidOperationException("Overlay failed."),
+        };
+        using var useCase = new SystemShutdownUseCase(lockRuntime, new RecordingShutdownPort());
+        Guid requestId = Guid.NewGuid();
+        await useCase.RequestShutdownAsync(requestId);
+        await useCase.RestoreLockWhileShutdownPendingAsync(requestId);
+        LockIntentSnapshot recoveryIntent = lockRuntime.CurrentIntent;
+        lockRuntime.CompleteRecoveryWithoutChangingIntent();
+
+        ShutdownCancellationRecoveryResult result =
+            await useCase.HandleShutdownCancellationAsync(requestId);
+
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.LockRestored, result);
+        Assert.AreEqual(recoveryIntent, lockRuntime.CurrentIntent);
+        Assert.AreEqual(1, lockRuntime.ConditionalRestoreCallCount);
+    }
+
+    [TestMethod]
+    public async Task NewUnlockSupersedesFailedSafetyRestore()
+    {
+        var lockRuntime = new RecordingLockRuntime(initiallyLocked: true)
+        {
+            RequestLockOperation = _ => throw new InvalidOperationException("Overlay failed."),
+        };
+        using var useCase = new SystemShutdownUseCase(lockRuntime, new RecordingShutdownPort());
+        Guid requestId = Guid.NewGuid();
+        await useCase.RequestShutdownAsync(requestId);
+        await useCase.RestoreLockWhileShutdownPendingAsync(requestId);
+        await lockRuntime.RequestDevelopmentUnlockAsync();
+
+        ShutdownCancellationRecoveryResult result =
+            await useCase.HandleShutdownCancellationAsync(requestId);
+
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.SupersededByNewerIntent, result);
+        Assert.AreEqual(LockState.Unlocked, lockRuntime.CurrentIntent.DesiredLock);
+        Assert.AreEqual(1, lockRuntime.ConditionalRestoreCallCount);
+    }
+
+    [TestMethod]
+    public async Task ConfirmedCancellationAfterSafetyRecoveryAndNewUnlockIsSuperseded()
+    {
+        var lockRuntime = new RecordingLockRuntime(initiallyLocked: true);
+        using var useCase = new SystemShutdownUseCase(lockRuntime, new RecordingShutdownPort());
+        Guid requestId = Guid.NewGuid();
+        await useCase.RequestShutdownAsync(requestId);
+        await useCase.RestoreLockWhileShutdownPendingAsync(requestId);
+        await lockRuntime.RequestDevelopmentUnlockAsync();
+
+        ShutdownCancellationRecoveryResult result =
+            await useCase.HandleShutdownCancellationAsync(requestId);
+
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.SupersededByNewerIntent, result);
+        Assert.AreEqual(1, lockRuntime.ConditionalRestoreCallCount);
+        Assert.AreEqual(LockState.Unlocked, lockRuntime.CurrentState.DesiredLock);
+    }
+
+    [TestMethod]
+    public async Task ConfirmedCancellationSharesInProgressSafetyRestoration()
+    {
+        var restoreStarted = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRestore = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var lockRuntime = new RecordingLockRuntime(initiallyLocked: true)
+        {
+            RequestLockOperation = async cancellationToken =>
+            {
+                restoreStarted.TrySetResult(true);
+                await releaseRestore.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            },
+        };
+        var shutdownPort = new RecordingShutdownPort();
+        using var useCase = new SystemShutdownUseCase(lockRuntime, shutdownPort);
+        Guid requestId = Guid.NewGuid();
+        await useCase.RequestShutdownAsync(requestId);
+
+        Task<ShutdownCancellationRecoveryResult> safety =
+            useCase.RestoreLockWhileShutdownPendingAsync(requestId);
+        await restoreStarted.Task;
+        Task<ShutdownCancellationRecoveryResult> confirmed =
+            useCase.HandleShutdownCancellationAsync(requestId);
+        releaseRestore.TrySetResult(true);
+        await Task.WhenAll(safety, confirmed);
+        await useCase.RequestShutdownAsync(Guid.NewGuid());
+
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.LockRestored, await confirmed);
+        Assert.AreEqual(1, lockRuntime.ConditionalRestoreCallCount);
+        Assert.AreEqual(2, shutdownPort.RequestShutdownCallCount);
+    }
+
+    [TestMethod]
+    public async Task StaleSafetyRecoveryCannotAffectNewAcceptedRequest()
+    {
+        var lockRuntime = new RecordingLockRuntime(initiallyLocked: true);
+        using var useCase = new SystemShutdownUseCase(lockRuntime, new RecordingShutdownPort());
+        Guid previousRequestId = Guid.NewGuid();
+        Guid currentRequestId = Guid.NewGuid();
+        await useCase.RequestShutdownAsync(previousRequestId);
+        await useCase.HandleShutdownCancellationAsync(previousRequestId);
+        await useCase.RequestShutdownAsync(currentRequestId);
+
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.NoAcceptedRequest,
+            await useCase.RestoreLockWhileShutdownPendingAsync(previousRequestId));
+        Assert.AreEqual(ShutdownCancellationRecoveryResult.LockRestored,
+            await useCase.HandleShutdownCancellationAsync(currentRequestId));
+        Assert.AreEqual(2, lockRuntime.ConditionalRestoreCallCount);
+    }
+
+    [TestMethod]
     public async Task DisposeDuringInFlightRequestAllowsSharedRequestToFinish()
     {
         var shutdownStarted = new TaskCompletionSource<bool>(
@@ -553,6 +731,10 @@ public sealed class SystemShutdownUseCaseTests
         public int RequestLockCallCount => Volatile.Read(ref _requestLockCallCount);
 
         public CancellationToken LastRequestLockCancellationToken { get; private set; }
+
+        public void CompleteRecoveryWithoutChangingIntent() => Volatile.Write(
+            ref _currentState,
+            new RuntimeState(LockState.Locked, OverlayProjectionState.Visible));
 
         public async Task RequestLockAsync(CancellationToken cancellationToken = default)
         {

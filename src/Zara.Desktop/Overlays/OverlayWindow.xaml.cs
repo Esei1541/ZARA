@@ -44,6 +44,9 @@ internal sealed partial class OverlayWindow : Window
     internal void SetEmergencyUnlockEnabled(bool isEnabled) =>
         EmergencyUnlockButton.IsEnabled = isEnabled;
 
+    internal void SetRecoveryActive(bool isActive) =>
+        RecoveryStatus.Visibility = isActive ? Visibility.Visible : Visibility.Collapsed;
+
     protected override void OnClosing(CancelEventArgs e)
     {
         if (!_coordinatorCloseAllowed)

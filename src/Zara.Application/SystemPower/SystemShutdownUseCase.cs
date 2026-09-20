@@ -10,7 +10,7 @@ namespace Zara.Application.SystemPower;
 /// <remarks>
 /// Compensation intentionally uses <see cref="CancellationToken.None"/> so caller cancellation
 /// cannot leave a lock that was requested before this operation silently removed. A successful
-/// platform request is remembered for the lifetime of this instance and is never repeated.
+/// platform request is remembered until its cancellation is confirmed and is not repeated while pending.
 /// </remarks>
 public sealed class SystemShutdownUseCase : ISystemShutdownUseCase, IDisposable
 {
@@ -25,6 +25,8 @@ public sealed class SystemShutdownUseCase : ISystemShutdownUseCase, IDisposable
     private Guid _acceptedRequestId;
     private bool _restoreLockAfterAcceptedCancellation;
     private long _acceptedCancellationIntentRevision;
+    private ShutdownCancellationRecoveryResult? _acceptedRecoveryResult;
+    private LockIntentSnapshot? _recoveredIntent;
     private bool _disposed;
 
     /// <summary>
@@ -102,7 +104,31 @@ public sealed class SystemShutdownUseCase : ISystemShutdownUseCase, IDisposable
     }
 
     /// <inheritdoc />
-    public Task<ShutdownCancellationRecoveryResult> HandleShutdownCancellationAsync(Guid requestId)
+    public async Task<ShutdownCancellationRecoveryResult> HandleShutdownCancellationAsync(Guid requestId)
+    {
+        try
+        {
+            return await RestoreLockWhileShutdownPendingAsync(requestId).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_requestSync)
+            {
+                if (_acceptedRequestId == requestId)
+                {
+                    _shutdownRequestAccepted = false;
+                    _acceptedRequestId = Guid.Empty;
+                    _restoreLockAfterAcceptedCancellation = false;
+                    _acceptedCancellationIntentRevision = 0;
+                    _acceptedRecoveryResult = null;
+                    _recoveredIntent = null;
+                }
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<ShutdownCancellationRecoveryResult> RestoreLockWhileShutdownPendingAsync(Guid requestId)
     {
         if (requestId == Guid.Empty)
         {
@@ -122,6 +148,11 @@ public sealed class SystemShutdownUseCase : ISystemShutdownUseCase, IDisposable
             if (!matchesAcceptedRequest && !matchesInFlightRequest)
             {
                 return Task.FromResult(ShutdownCancellationRecoveryResult.NoAcceptedRequest);
+            }
+
+            if (_acceptedRecoveryResult is { } priorResult)
+            {
+                return Task.FromResult(ResolveRecoveryResult(priorResult));
             }
 
             if (_inFlightCancellationRecovery is not null)
@@ -237,32 +268,53 @@ public sealed class SystemShutdownUseCase : ISystemShutdownUseCase, IDisposable
                 expectedIntentRevision = _acceptedCancellationIntentRevision;
             }
 
-            if (!restoreLock)
+            bool restored = false;
+            bool recoveryPending = false;
+            var restoredIntent = new LockIntentSnapshot(
+                LockState.Locked,
+                checked(expectedIntentRevision + 1));
+#pragma warning disable CA1031 // Once the owned lock intent is restored, the runtime owns failed-effect retries.
+            try
             {
-                return ShutdownCancellationRecoveryResult.LockNotRequired;
+                restored = restoreLock && await _lockRuntime
+                        .RestoreLockIfIntentRevisionAsync(
+                            expectedIntentRevision,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+            }
+            catch (Exception exception) when (
+                exception is not ObjectDisposedException &&
+                restoreLock && _lockRuntime.CurrentIntent == restoredIntent)
+            {
+                restored = true;
+                recoveryPending = true;
+            }
+#pragma warning restore CA1031
+            ShutdownCancellationRecoveryResult result = !restoreLock
+                ? ShutdownCancellationRecoveryResult.LockNotRequired
+                : restored
+                    ? recoveryPending
+                        ? ShutdownCancellationRecoveryResult.RecoveryPending
+                        : ShutdownCancellationRecoveryResult.LockRestored
+                    : ShutdownCancellationRecoveryResult.SupersededByNewerIntent;
+            lock (_requestSync)
+            {
+                if (_acceptedRequestId == requestId)
+                {
+                    _acceptedRecoveryResult = result;
+                    _recoveredIntent = new LockIntentSnapshot(
+                        restoreLock ? LockState.Locked : LockState.Unlocked,
+                        restored ? checked(expectedIntentRevision + 1) : expectedIntentRevision);
+                    result = ResolveRecoveryResult(result);
+                }
             }
 
-            bool restored = await _lockRuntime
-                .RestoreLockIfIntentRevisionAsync(
-                    expectedIntentRevision,
-                    CancellationToken.None)
-                .ConfigureAwait(false);
-            return restored
-                ? ShutdownCancellationRecoveryResult.LockRestored
-                : ShutdownCancellationRecoveryResult.SupersededByNewerIntent;
+            return result;
         }
         finally
         {
             lock (_requestSync)
             {
-                if (_acceptedRequestId == requestId)
-                {
-                    _shutdownRequestAccepted = false;
-                    _acceptedRequestId = Guid.Empty;
-                    _restoreLockAfterAcceptedCancellation = false;
-                    _acceptedCancellationIntentRevision = 0;
-                }
-
                 if (_inFlightCancellationRequestId == requestId)
                 {
                     _inFlightCancellationRecovery = null;
@@ -270,6 +322,22 @@ public sealed class SystemShutdownUseCase : ISystemShutdownUseCase, IDisposable
                 }
             }
         }
+    }
+
+    private ShutdownCancellationRecoveryResult ResolveRecoveryResult(
+        ShutdownCancellationRecoveryResult result)
+    {
+        if (_recoveredIntent is { } recoveredIntent && recoveredIntent != _lockRuntime.CurrentIntent)
+        {
+            return ShutdownCancellationRecoveryResult.SupersededByNewerIntent;
+        }
+
+        return result is ShutdownCancellationRecoveryResult.LockRestored or
+            ShutdownCancellationRecoveryResult.RecoveryPending
+                ? _lockRuntime.CurrentState.OverlayProjection == OverlayProjectionState.Visible
+                    ? ShutdownCancellationRecoveryResult.LockRestored
+                    : ShutdownCancellationRecoveryResult.RecoveryPending
+                : result;
     }
 
     private async Task RequestShutdownCoreAsync(
