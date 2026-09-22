@@ -64,9 +64,6 @@
             <TextBlock Foreground="#FF5C6470"
                        TextWrapping="Wrap"
                        Text="(시스템 트레이에서 직접 종료 시에는 실행되지 않습니다. 잠금 시각에는 설정과 관계 없이 실행됩니다.)" />
-            <TextBlock Margin="0,24,0,0"
-                       FontWeight="SemiBold"
-                       Text="설정 변경 제한" />
             <TextBlock Margin="0,8,0,0"
                        Foreground="#FF5C6470"
                        TextWrapping="Wrap"
