@@ -198,6 +198,26 @@ public static class UsagePolicyEvaluator
     }
 
     /// <summary>
+    /// Removes reservations whose local end time has been reached, preserving the existing
+    /// settings instance when no reservation has expired.
+    /// </summary>
+    public static UsagePolicySettings RemoveExpiredReservations(
+        UsagePolicySettings settings,
+        DateTime localNow)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (!settings.Reservations.Any(reservation =>
+                reservation.Date.ToDateTime(reservation.EndTime) <= localNow))
+        {
+            return settings;
+        }
+
+        return settings.WithReservations(settings.Reservations.Where(reservation =>
+            reservation.Date.ToDateTime(reservation.EndTime) > localNow));
+    }
+
+    /// <summary>
     /// Determines whether two same-day reservations share at least one included instant.
     /// </summary>
     /// <remarks>

@@ -192,7 +192,7 @@ public sealed class MainWindowViewModelTests
 #endif
 
     [STATestMethod]
-    public async Task ReservationPresentationUsesTheRuntimeEvaluationTime()
+    public async Task ReservationExpiresFromTheListAtItsEndTime()
     {
         var timeProvider = new ManualTimeProvider(
             new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero));
@@ -216,14 +216,48 @@ public sealed class MainWindowViewModelTests
         timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 8, 1, 0, TimeSpan.Zero));
         await runtime.RefreshAsync();
 
-        Assert.IsFalse(viewModel.Reservations.Single().IsActive);
+        Assert.IsEmpty(viewModel.Reservations);
     }
 
     [STATestMethod]
-    [DataRow(false, -1)]
+    public async Task InitializeRemovesExpiredReservationsFromTheList()
+    {
+        var timeProvider = new ManualTimeProvider(
+            new DateTimeOffset(2026, 9, 22, 15, 0, 0, TimeSpan.Zero));
+        var expiredReservation = new OutOfHoursReservation(
+            Guid.NewGuid(),
+            new DateOnly(2026, 9, 22),
+            new TimeOnly(0, 0),
+            new TimeOnly(1, 0),
+            "지난 예약");
+        var futureReservation = new OutOfHoursReservation(
+            Guid.NewGuid(),
+            new DateOnly(2026, 9, 22),
+            new TimeOnly(16, 0),
+            new TimeOnly(17, 0),
+            "미래 예약");
+        var store = new RecordingStore(
+            UsagePolicySettings.Default.WithReservations([expiredReservation, futureReservation]));
+        using var runtime = CreateRuntime(store, timeProvider);
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+
+        Assert.HasCount(1, viewModel.Reservations);
+        Assert.AreEqual(futureReservation.Id, viewModel.Reservations.Single().Id);
+        Assert.HasCount(1, store.Settings.Reservations);
+        Assert.AreEqual(futureReservation.Id, store.Settings.Reservations.Single().Id);
+
+        await runtime.RefreshAsync();
+
+        Assert.HasCount(1, viewModel.Reservations);
+        Assert.AreEqual(futureReservation.Id, viewModel.Reservations.Single().Id);
+        Assert.HasCount(1, store.Settings.Reservations);
+        Assert.AreEqual(futureReservation.Id, store.Settings.Reservations.Single().Id);
+    }
+
+    [STATestMethod]
     [DataRow(false, 0)]
     [DataRow(false, 1)]
-    [DataRow(true, -1)]
     [DataRow(true, 0)]
     [DataRow(true, 1)]
     public async Task AnyReservationCanBeDeletedWithoutEnablingOtherSettings(bool withinUsageBan, int dayOffset)

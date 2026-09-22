@@ -405,6 +405,47 @@ public sealed class UsagePolicyEvaluatorTests
     }
 
     [TestMethod]
+    [DataRow(-1, false)]
+    [DataRow(0, true)]
+    [DataRow(1, true)]
+    public void ExpiredReservationCleanupUsesTheExactLocalEndTime(int tickOffset, bool expired)
+    {
+        var reservation = Reservation(
+            new DateOnly(2026, 9, 22), new TimeOnly(0, 0), new TimeOnly(1, 0));
+        UsagePolicySettings settings = SettingsWithReservations(reservation);
+        DateTime localNow = new DateTime(2026, 9, 22, 1, 0, 0).AddTicks(tickOffset);
+
+        UsagePolicySettings remaining = UsagePolicyEvaluator.RemoveExpiredReservations(settings, localNow);
+
+        Assert.HasCount(expired ? 0 : 1, remaining.Reservations);
+        Assert.HasCount(1, settings.Reservations);
+        Assert.AreSame(settings.WeeklySchedule, remaining.WeeklySchedule);
+        Assert.AreSame(settings.EmergencyUnlock, remaining.EmergencyUnlock);
+        if (!expired)
+        {
+            Assert.AreSame(settings, remaining);
+        }
+    }
+
+    [TestMethod]
+    public void ExpiredReservationCleanupPreservesActiveAndFutureReservations()
+    {
+        var past = Reservation(new DateOnly(2026, 9, 21), new TimeOnly(23, 0), new TimeOnly(23, 59));
+        var ended = Reservation(new DateOnly(2026, 9, 22), new TimeOnly(0, 0), new TimeOnly(1, 0));
+        var active = Reservation(new DateOnly(2026, 9, 22), new TimeOnly(14, 0), new TimeOnly(16, 0));
+        var later = Reservation(new DateOnly(2026, 9, 22), new TimeOnly(16, 0), new TimeOnly(17, 0));
+        var tomorrow = Reservation(new DateOnly(2026, 9, 23), new TimeOnly(0, 0), new TimeOnly(1, 0));
+        UsagePolicySettings settings = SettingsWithReservations(past, ended, active, later, tomorrow);
+
+        UsagePolicySettings remaining = UsagePolicyEvaluator.RemoveExpiredReservations(
+            settings, new DateTime(2026, 9, 22, 15, 0, 0));
+
+        CollectionAssert.AreEqual(new[] { active, later, tomorrow }, remaining.Reservations.ToArray());
+        Assert.AreSame(remaining, UsagePolicyEvaluator.RemoveExpiredReservations(
+            remaining, new DateTime(2026, 9, 22, 15, 0, 1)));
+    }
+
+    [TestMethod]
     public void TryRemoveReservationLeavesUnknownIdsUntouched()
     {
         OutOfHoursReservation reservation = Reservation(

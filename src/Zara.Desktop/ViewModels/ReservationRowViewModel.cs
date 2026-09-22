@@ -9,7 +9,6 @@ namespace Zara.Desktop.ViewModels;
 /// </summary>
 internal sealed class ReservationRowViewModel : INotifyPropertyChanged
 {
-    private bool _isExpired;
     private bool _isActive;
 
     /// <summary>Creates a row for the supplied persisted reservation.</summary>
@@ -33,13 +32,6 @@ internal sealed class ReservationRowViewModel : INotifyPropertyChanged
 
     public string Memo => Reservation.Memo;
 
-    /// <summary>Gets whether the reservation belongs to a past date.</summary>
-    public bool IsExpired
-    {
-        get => _isExpired;
-        private set => SetField(ref _isExpired, value);
-    }
-
     /// <summary>Gets whether the current local time is inside this reservation.</summary>
     public bool IsActive
     {
@@ -61,7 +53,6 @@ internal sealed class ReservationRowViewModel : INotifyPropertyChanged
     {
         DateOnly localDate = DateOnly.FromDateTime(localNow);
         TimeOnly localTime = TimeOnly.FromDateTime(localNow);
-        IsExpired = Date < localDate;
         IsActive = Date == localDate && StartTime <= localTime && localTime < EndTime;
     }
 
