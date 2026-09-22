@@ -1,7 +1,7 @@
 # ZARA
 
 [![Release](https://img.shields.io/github/v/release/Esei1541/ZARA?label=Release)](https://github.com/Esei1541/ZARA/releases/latest)
-![라이선스](https://img.shields.io/badge/license-%EB%AF%B8%ED%99%95%EC%9D%B8-lightgrey)
+[![라이선스](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-blue)](LICENSE)
 ![Windows 11](https://img.shields.io/badge/Windows-11-0078D4)
 
 ## 개요
@@ -90,3 +90,15 @@ Windows 11용 64비트 설치 파일을 사용합니다.
 ### 프로그램 종료하기
 
 시스템 트레이에서 ZARA 아이콘을 오른쪽 클릭 후 **종료**를 선택합니다. 이렇게 종료하면 자동으로 다시 실행되지 않으며, **프로그램을 다시 켤 때까지 자동 잠금도 작동하지 않습니다**.
+
+## 라이선스
+
+ZARA는 [PolyForm Noncommercial 1.0.0](LICENSE)을 따릅니다.
+
+- 개인 학습·취미 등 비상업적 목적의 사용·수정·재배포를 허용합니다.
+- 상업적·영리 목적의 이용은 허용하지 않습니다. 구체적인 허용 범위는 라이선스 원문을 따릅니다.
+- 재배포할 때는 라이선스 원문 또는 [공식 링크](https://polyformproject.org/licenses/noncommercial/1.0.0)와 아래 출처 고지를 함께 제공해야 합니다. 라이선스 메뉴나 동봉 파일 등에 남기면 됩니다.
+
+```text
+Required Notice: https://github.com/Esei1541/ZARA
+```
