@@ -55,7 +55,7 @@
                      Text="실행 설정" />
           <CheckBox Grid.Row="2"
                     Command="{Binding ToggleRestartSettingCommand}"
-                    Content="잠금이 해제된 상태에서도 ZARA가 종료되면 자동으로 다시 실행"
+                    Content="잠금이 해제된 상태에서도 프로그램이 종료되면 자동으로 다시 실행"
                     IsChecked="{Binding RestartOnExitWhenUnlocked, Mode=OneWay}"
                     IsEnabled="{Binding CanChangeSettings}"
                     VerticalContentAlignment="Center" />
