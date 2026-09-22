@@ -51,7 +51,7 @@
                   Margin="4,0"
                   Padding="18,0"
                   Click="EmergencyUnlock_Click"
-                  Content="긴급 잠금 해제" />
+                  Content="긴급 해제" />
           <Button x:Name="SystemShutdownButton"
                   MinWidth="152"
                   Height="42"

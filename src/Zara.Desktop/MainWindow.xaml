@@ -55,15 +55,23 @@
                      Text="실행 설정" />
           <CheckBox Grid.Row="2"
                     Command="{Binding ToggleRestartSettingCommand}"
-                    Content="정상 사용 시간에도 프로그램을 종료하면 다시 실행"
+                    Content="잠금이 해제된 상태에서도 프로그램이 종료되면 자동으로 다시 실행"
                     IsChecked="{Binding RestartOnExitWhenUnlocked, Mode=OneWay}"
                     IsEnabled="{Binding CanChangeSettings}"
                     VerticalContentAlignment="Center" />
-          <TextBlock Grid.Row="3"
-                     Margin="0,12,0,0"
-                     Foreground="#FF5C6470"
-                     TextWrapping="Wrap"
-                     Text="사용 금지 시간에는 모든 설정 변경이 비활성화됩니다. 시간 외 사용 예약이나 긴급 해제가 적용 중이어도 같습니다." />
+          <StackPanel Grid.Row="3"
+                      Margin="0,12,0,0">
+            <TextBlock Foreground="#FF5C6470"
+                       TextWrapping="Wrap"
+                       Text="(시스템 트레이에서 직접 종료 시에는 실행되지 않습니다. 잠금 시각에는 설정과 관계 없이 실행됩니다.)" />
+            <TextBlock Margin="0,24,0,0"
+                       FontWeight="SemiBold"
+                       Text="설정 변경 제한" />
+            <TextBlock Margin="0,8,0,0"
+                       Foreground="#FF5C6470"
+                       TextWrapping="Wrap"
+                       Text="사용 금지 시간에는 설정을 바꿀 수 없습니다. 시간 외 사용 예약이나 긴급 해제로 사용 중이어도 변경할 수 없습니다." />
+          </StackPanel>
           <StackPanel x:Name="ShellActions"
                       Grid.Row="4"
                       HorizontalAlignment="Right"
