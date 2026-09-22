@@ -279,15 +279,6 @@
                     HeadersVisibility="Column"
                     IsReadOnly="True"
                     ItemsSource="{Binding ReservationsView}">
-            <DataGrid.RowStyle>
-              <Style TargetType="DataGridRow">
-                <Style.Triggers>
-                  <DataTrigger Binding="{Binding IsExpired}" Value="True">
-                    <Setter Property="Foreground" Value="#FF9AA0A8" />
-                  </DataTrigger>
-                </Style.Triggers>
-              </Style>
-            </DataGrid.RowStyle>
             <DataGrid.Columns>
               <DataGridTextColumn Width="130"
                                   Binding="{Binding Date, StringFormat={}{0:yyyy-MM-dd}}"

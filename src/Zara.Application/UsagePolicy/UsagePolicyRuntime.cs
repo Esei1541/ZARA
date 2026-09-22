@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Zara.Core.UsagePolicy;
 
 namespace Zara.Application.UsagePolicy;
@@ -357,6 +358,7 @@ public sealed class UsagePolicyRuntime : IDisposable
         UsagePolicySettings settings,
         CancellationToken cancellationToken)
     {
+        settings = UsagePolicyEvaluator.RemoveExpiredReservations(settings, GetCurrentLocalTime());
         await _store.SaveAsync(settings, cancellationToken).ConfigureAwait(false);
         try
         {
@@ -391,6 +393,26 @@ public sealed class UsagePolicyRuntime : IDisposable
                 .ApplyPolicyLockRequirementAsync(evaluation.LockRequired, cancellationToken)
                 .ConfigureAwait(false);
             _lastAppliedLockRequirement = evaluation.LockRequired;
+        }
+
+        UsagePolicySettings remainingSettings = UsagePolicyEvaluator.RemoveExpiredReservations(
+            settings,
+            localNow);
+        if (!ReferenceEquals(settings, remainingSettings))
+        {
+            try
+            {
+                // Apply the lock first: cleanup I/O must not delay or prevent an expired
+                // reservation from restoring the base restriction.
+                await _store.SaveAsync(remainingSettings, cancellationToken).ConfigureAwait(false);
+                settings = remainingSettings;
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Retain the loaded settings so a later refresh retries cleanup, including when
+                // the app starts with an expired reservation and its settings cannot be written.
+                Trace.TraceError("Expired reservation cleanup could not be saved: {0}", exception);
+            }
         }
 
         PublishSnapshotIfChanged(settings, evaluation, localNow);
