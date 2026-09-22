@@ -14,8 +14,11 @@ AppName=ZARA
 AppVersion={#AppVersion}
 AppPublisher=ZARA
 DefaultDirName={autopf}\ZARA
-DisableDirPage=yes
-UsePreviousAppDir=no
+DisableDirPage=auto
+UsePreviousAppDir=yes
+AllowNetworkDrive=no
+AllowUNCPath=no
+AllowRootDirectory=no
 DefaultGroupName=ZARA
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
@@ -38,6 +41,10 @@ SetupLogging=yes
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
+
+[Dirs]
+; Prepare creates the protected application directory before Inno copies files.
+Name: "{app}"; Flags: uninsalwaysuninstall
 
 [Files]
 Source: "Manage-Installation.ps1"; Flags: dontcopy
@@ -63,7 +70,7 @@ begin
     TransactionId := GetSHA256OfString(ExpandConstant('{tmp}'));
   Result := ExecAndLogOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' + AddQuotes(ScriptPath) +
-    ' -Action ' + Action + ' -InstallDirectory ' + AddQuotes(ExpandConstant('{autopf}\ZARA')) +
+    ' -Action ' + Action + ' -InstallDirectory ' + AddQuotes(ExpandConstant('{app}')) +
     ' -TransactionId ' + TransactionId,
     '', SW_HIDE, ewWaitUntilTerminated, ResultCode, nil);
   Result := Result and (ResultCode = 0);
@@ -71,17 +78,24 @@ begin
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  PreviousDirectory: String;
 begin
   Result := '';
   if Prepared then exit;
-  if CompareText(ExpandConstant('{app}'), ExpandConstant('{autopf}\ZARA')) <> 0 then begin
-    Result := 'ZARA의 설치 위치를 변경할 수 없습니다.';
-    exit;
-  end;
+  { Also reject /DIR overrides when the directory page is hidden for an update. }
+  if RegQueryStringValue(HKLM64,
+      'Software\Microsoft\Windows\CurrentVersion\Uninstall\{1B6D4754-0971-4A21-971B-69EB363A2A27}_is1',
+      'Inno Setup: App Path', PreviousDirectory) then
+    if CompareText(RemoveBackslashUnlessRoot(ExpandFileName(ExpandConstant('{app}'))),
+        RemoveBackslashUnlessRoot(ExpandFileName(PreviousDirectory))) <> 0 then begin
+      Result := '업데이트는 기존 설치 폴더에서 진행해야 합니다. 설치 위치를 바꾸려면 ZARA를 제거한 뒤 다시 설치하십시오.';
+      exit;
+    end;
   ExtractTemporaryFile('Manage-Installation.ps1');
   if not RunManagement(ExpandConstant('{tmp}\Manage-Installation.ps1'), 'Prepare') then begin
     RunManagement(ExpandConstant('{tmp}\Manage-Installation.ps1'), 'Rollback');
-    Result := '기존 ZARA를 안전하게 종료하지 못했습니다. 설치를 중단했습니다.';
+    Result := '설치 폴더를 사용할 수 없거나 기존 ZARA를 안전하게 종료하지 못했습니다. 설치 로그를 확인하십시오.';
     exit;
   end;
   Prepared := True;
