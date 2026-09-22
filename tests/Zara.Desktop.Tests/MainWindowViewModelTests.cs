@@ -1,3 +1,4 @@
+using System.IO;
 using Zara.Application.UsagePolicy;
 using Zara.Core.UsagePolicy;
 using Zara.Desktop.ViewModels;
@@ -8,6 +9,7 @@ namespace Zara.Desktop.Tests;
 public sealed class MainWindowViewModelTests
 {
     private static readonly bool[] FirstLockEndsThenSecondLockStarts = [true, false, true];
+    private static readonly int[] ReminderMinutes = [30, 10, 5, 1];
 
     [STATestMethod]
     public async Task RuntimeStateChangeDoesNotOverwriteUnsavedScheduleText()
@@ -108,6 +110,149 @@ public sealed class MainWindowViewModelTests
         Assert.AreEqual(
             "지금은 설정된 사용 금지 시각이 없습니다.",
             viewModel.UsagePolicyStatusMessage);
+    }
+
+    [STATestMethod]
+    [DataRow(30)]
+    [DataRow(10)]
+    [DataRow(5)]
+    [DataRow(1)]
+    public async Task EachVoiceReminderCommandUpdatesOnlyItsOwnSetting(int minutes)
+    {
+        using var runtime = CreateRuntime(
+            new RecordingStore(UsagePolicySettings.Default),
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        int? savedMinutes = null;
+        bool? savedValue = null;
+        using var viewModel = CreateViewModel(
+            runtime,
+            LockReminderSettings.Default,
+            (requestedMinutes, enabled) =>
+            {
+                savedMinutes = requestedMinutes;
+                savedValue = enabled;
+                return Task.CompletedTask;
+            });
+        var notificationSource = new TaskCompletionSource<MainWindowNotificationEventArgs>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.NotificationRequested += (_, notification) =>
+            notificationSource.TrySetResult(notification);
+
+        GetVoiceReminderCommand(viewModel, minutes).Execute(parameter: null);
+        MainWindowNotificationEventArgs notification = await notificationSource.Task.WaitAsync(
+            TimeSpan.FromSeconds(5));
+
+        Assert.AreEqual(minutes, savedMinutes);
+        Assert.IsFalse(savedValue);
+        Assert.IsFalse(GetVoiceReminderValue(viewModel, minutes));
+        foreach (int otherMinutes in ReminderMinutes.Where(value => value != minutes))
+        {
+            Assert.IsTrue(GetVoiceReminderValue(viewModel, otherMinutes));
+        }
+
+        Assert.IsFalse(notification.IsError);
+        Assert.AreEqual("잠금 전 음성 안내 설정을 저장했습니다.", notification.Message);
+    }
+
+    [STATestMethod]
+    public async Task FailedVoiceReminderSaveRestoresTheAcknowledgedValue()
+    {
+        using var runtime = CreateRuntime(
+            new RecordingStore(UsagePolicySettings.Default),
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(
+            runtime,
+            LockReminderSettings.Default,
+            (_, _) => Task.FromException(new IOException("Save failed.")));
+        var notificationSource = new TaskCompletionSource<MainWindowNotificationEventArgs>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.NotificationRequested += (_, notification) =>
+            notificationSource.TrySetResult(notification);
+
+        viewModel.ToggleVoiceReminder10MinutesCommand.Execute(parameter: null);
+        MainWindowNotificationEventArgs notification = await notificationSource.Task.WaitAsync(
+            TimeSpan.FromSeconds(5));
+
+        Assert.IsTrue(viewModel.VoiceReminder10Minutes);
+        Assert.IsTrue(notification.IsError);
+        Assert.AreEqual("설정을 저장하지 못했습니다. 잠시 후 다시 시도하세요.", notification.Message);
+    }
+
+    [STATestMethod]
+    public async Task VoiceReminderCommandsAreBlockedDuringUsageBan()
+    {
+        using var runtime = CreateRuntime(
+            new RecordingStore(SettingsWithMondayRestriction(
+                new TimeOnly(7, 0),
+                new TimeOnly(10, 0))),
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(
+            runtime,
+            LockReminderSettings.Default,
+            (_, _) => Task.CompletedTask);
+
+        Assert.IsFalse(viewModel.ToggleVoiceReminder30MinutesCommand.CanExecute(null));
+        Assert.IsFalse(viewModel.ToggleVoiceReminder10MinutesCommand.CanExecute(null));
+        Assert.IsFalse(viewModel.ToggleVoiceReminder5MinutesCommand.CanExecute(null));
+        Assert.IsFalse(viewModel.ToggleVoiceReminder1MinuteCommand.CanExecute(null));
+    }
+
+    [STATestMethod]
+    public async Task VoiceReminderCommandsRemainDisabledWithoutAnUpdateCallback()
+    {
+        using var runtime = CreateRuntime(
+            new RecordingStore(UsagePolicySettings.Default),
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+
+        Assert.IsTrue(viewModel.CanChangeSettings);
+        Assert.IsFalse(viewModel.ToggleVoiceReminder30MinutesCommand.CanExecute(null));
+        Assert.IsFalse(viewModel.ToggleVoiceReminder10MinutesCommand.CanExecute(null));
+        Assert.IsFalse(viewModel.ToggleVoiceReminder5MinutesCommand.CanExecute(null));
+        Assert.IsFalse(viewModel.ToggleVoiceReminder1MinuteCommand.CanExecute(null));
+    }
+
+    [STATestMethod]
+    public async Task SavingOneVoiceReminderBlocksTheOtherReminderCommands()
+    {
+        using var runtime = CreateRuntime(
+            new RecordingStore(UsagePolicySettings.Default),
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        var saveStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowSave = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var viewModel = CreateViewModel(
+            runtime,
+            LockReminderSettings.Default,
+            async (_, _) =>
+            {
+                saveStarted.TrySetResult();
+                await allowSave.Task;
+            });
+        var notificationSource = new TaskCompletionSource<MainWindowNotificationEventArgs>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.NotificationRequested += (_, notification) =>
+            notificationSource.TrySetResult(notification);
+
+        viewModel.ToggleVoiceReminder30MinutesCommand.Execute(parameter: null);
+        await saveStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.IsFalse(viewModel.ToggleVoiceReminder10MinutesCommand.CanExecute(null));
+        Assert.IsFalse(viewModel.ToggleVoiceReminder5MinutesCommand.CanExecute(null));
+        Assert.IsFalse(viewModel.ToggleVoiceReminder1MinuteCommand.CanExecute(null));
+
+        allowSave.TrySetResult();
+        await notificationSource.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.IsTrue(viewModel.ToggleVoiceReminder10MinutesCommand.CanExecute(null));
     }
 
     [STATestMethod]
@@ -506,6 +651,12 @@ public sealed class MainWindowViewModelTests
     }
 
     private static MainWindowViewModel CreateViewModel(UsagePolicyRuntime runtime) =>
+        CreateViewModel(runtime, lockReminderSettings: null, updateLockReminderSetting: null);
+
+    private static MainWindowViewModel CreateViewModel(
+        UsagePolicyRuntime runtime,
+        LockReminderSettings? lockReminderSettings,
+        Func<int, bool, Task>? updateLockReminderSetting) =>
         new(
             runtime,
             restartOnExitWhenUnlocked: true,
@@ -514,7 +665,31 @@ public sealed class MainWindowViewModelTests
             , requestLock: () => Task.CompletedTask,
             requestDevelopmentUnlock: () => Task.CompletedTask
 #endif
+            , lockReminderSettings: lockReminderSettings,
+            updateLockReminderSetting: updateLockReminderSetting
             );
+
+    private static System.Windows.Input.ICommand GetVoiceReminderCommand(
+        MainWindowViewModel viewModel,
+        int minutes) => minutes switch
+        {
+            30 => viewModel.ToggleVoiceReminder30MinutesCommand,
+            10 => viewModel.ToggleVoiceReminder10MinutesCommand,
+            5 => viewModel.ToggleVoiceReminder5MinutesCommand,
+            1 => viewModel.ToggleVoiceReminder1MinuteCommand,
+            _ => throw new ArgumentOutOfRangeException(nameof(minutes)),
+        };
+
+    private static bool GetVoiceReminderValue(
+        MainWindowViewModel viewModel,
+        int minutes) => minutes switch
+        {
+            30 => viewModel.VoiceReminder30Minutes,
+            10 => viewModel.VoiceReminder10Minutes,
+            5 => viewModel.VoiceReminder5Minutes,
+            1 => viewModel.VoiceReminder1Minute,
+            _ => throw new ArgumentOutOfRangeException(nameof(minutes)),
+        };
 
     private static UsagePolicyRuntime CreateRuntime(
         RecordingStore store,

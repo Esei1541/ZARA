@@ -20,12 +20,19 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         "설정은 저장했습니다. 현재 잠금 상태를 적용하지 못해 자동으로 다시 시도합니다.";
 
     private readonly Func<bool, Task> _updateRestartSetting;
+    private readonly Func<int, bool, Task>? _updateLockReminderSetting;
     private readonly AsyncCommand _toggleRestartSettingCommand;
+    private readonly AsyncCommand _toggleVoiceReminder30MinutesCommand;
+    private readonly AsyncCommand _toggleVoiceReminder10MinutesCommand;
+    private readonly AsyncCommand _toggleVoiceReminder5MinutesCommand;
+    private readonly AsyncCommand _toggleVoiceReminder1MinuteCommand;
     private readonly AsyncCommand _saveWeeklyScheduleCommand;
     private readonly AsyncCommand _saveEmergencyUnlockSettingsCommand;
     private readonly SynchronizationContext? _synchronizationContext;
     private readonly UsagePolicyRuntime? _usagePolicyRuntime;
     private bool _restartOnExitWhenUnlocked;
+    private LockReminderSettings _lockReminderSettings;
+    private bool _isLockReminderSettingUpdateInProgress;
     private bool _isSettingsChangeAllowed = true;
     private string _emergencyDurationMinutesText = EmergencyUnlockSettings.Default.DurationMinutes
         .ToString(CultureInfo.InvariantCulture);
@@ -48,11 +55,15 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         , Func<Task> requestLock,
         Func<Task> requestDevelopmentUnlock
 #endif
+        , LockReminderSettings? lockReminderSettings = null,
+        Func<int, bool, Task>? updateLockReminderSetting = null
         )
     {
         _restartOnExitWhenUnlocked = restartOnExitWhenUnlocked;
+        _lockReminderSettings = lockReminderSettings ?? LockReminderSettings.Default;
         _updateRestartSetting =
             updateRestartSetting ?? throw new ArgumentNullException(nameof(updateRestartSetting));
+        _updateLockReminderSetting = updateLockReminderSetting;
 #if DEBUG
         ArgumentNullException.ThrowIfNull(requestLock);
         ArgumentNullException.ThrowIfNull(requestDevelopmentUnlock);
@@ -81,6 +92,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             ToggleRestartSettingAsync,
             ReportSettingsFailure,
             () => CanChangeSettings);
+        _toggleVoiceReminder30MinutesCommand = CreateLockReminderToggleCommand(30);
+        _toggleVoiceReminder10MinutesCommand = CreateLockReminderToggleCommand(10);
+        _toggleVoiceReminder5MinutesCommand = CreateLockReminderToggleCommand(5);
+        _toggleVoiceReminder1MinuteCommand = CreateLockReminderToggleCommand(1);
         _saveWeeklyScheduleCommand = new AsyncCommand(
             SaveWeeklyScheduleAsync,
             ReportWeeklyScheduleFailure,
@@ -109,11 +124,14 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         , Func<Task> requestLock,
         Func<Task> requestDevelopmentUnlock
 #endif
+        , LockReminderSettings? lockReminderSettings = null,
+        Func<int, bool, Task>? updateLockReminderSetting = null
         )
         : this(restartOnExitWhenUnlocked, updateRestartSetting
 #if DEBUG
             , requestLock, requestDevelopmentUnlock
 #endif
+            , lockReminderSettings, updateLockReminderSetting
             )
     {
         _usagePolicyRuntime = usagePolicyRuntime ??
@@ -140,6 +158,18 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     public ICollectionView ReservationsView { get; }
 
     public ICommand ToggleRestartSettingCommand => _toggleRestartSettingCommand;
+
+    public ICommand ToggleVoiceReminder30MinutesCommand =>
+        _toggleVoiceReminder30MinutesCommand;
+
+    public ICommand ToggleVoiceReminder10MinutesCommand =>
+        _toggleVoiceReminder10MinutesCommand;
+
+    public ICommand ToggleVoiceReminder5MinutesCommand =>
+        _toggleVoiceReminder5MinutesCommand;
+
+    public ICommand ToggleVoiceReminder1MinuteCommand =>
+        _toggleVoiceReminder1MinuteCommand;
 
     /// <summary>Gets the command that persists only the weekday usage-ban schedule.</summary>
     public ICommand SaveWeeklyScheduleCommand => _saveWeeklyScheduleCommand;
@@ -172,6 +202,14 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         get => _restartOnExitWhenUnlocked;
         private set => SetField(ref _restartOnExitWhenUnlocked, value);
     }
+
+    public bool VoiceReminder30Minutes => _lockReminderSettings.ThirtyMinutes;
+
+    public bool VoiceReminder10Minutes => _lockReminderSettings.TenMinutes;
+
+    public bool VoiceReminder5Minutes => _lockReminderSettings.FiveMinutes;
+
+    public bool VoiceReminder1Minute => _lockReminderSettings.OneMinute;
 
     /// <summary>
     /// Gets or sets the user-entered emergency-unlock duration. The value is validated only when
@@ -262,6 +300,48 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         {
             OnPropertyChanged(nameof(RestartOnExitWhenUnlocked));
             throw;
+        }
+    }
+
+    private AsyncCommand CreateLockReminderToggleCommand(int minutes) =>
+        new(
+            () => ToggleLockReminderSettingAsync(minutes),
+            ReportSettingsFailure,
+            () => CanChangeSettings &&
+                _updateLockReminderSetting is not null &&
+                !_isLockReminderSettingUpdateInProgress);
+
+    private async Task ToggleLockReminderSettingAsync(int minutes)
+    {
+        Func<int, bool, Task> updateLockReminderSetting = _updateLockReminderSetting ??
+            throw new InvalidOperationException("Lock reminder settings are not connected.");
+        bool requestedValue = !_lockReminderSettings.IsEnabled(minutes);
+        string propertyName = GetLockReminderPropertyName(minutes);
+
+        // CheckBox changes its local value before invoking the command. Keep showing the last
+        // acknowledged snapshot until persistence succeeds.
+        OnPropertyChanged(propertyName);
+        _isLockReminderSettingUpdateInProgress = true;
+        NotifyLockReminderCanExecuteChanged();
+
+        try
+        {
+            await updateLockReminderSetting(minutes, requestedValue).ConfigureAwait(true);
+            _lockReminderSettings = _lockReminderSettings.WithEnabled(minutes, requestedValue);
+            OnPropertyChanged(propertyName);
+            RequestNotification(
+                "잠금 전 음성 안내 설정을 저장했습니다.",
+                isError: false);
+        }
+        catch
+        {
+            OnPropertyChanged(propertyName);
+            throw;
+        }
+        finally
+        {
+            _isLockReminderSettingUpdateInProgress = false;
+            NotifyLockReminderCanExecuteChanged();
         }
     }
 
@@ -407,6 +487,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(CanChangeSettings));
         OnPropertyChanged(nameof(CanChangeUsagePolicySettings));
         _toggleRestartSettingCommand.NotifyCanExecuteChanged();
+        NotifyLockReminderCanExecuteChanged();
         _saveWeeklyScheduleCommand.NotifyCanExecuteChanged();
         _saveEmergencyUnlockSettingsCommand.NotifyCanExecuteChanged();
     }
@@ -491,6 +572,23 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
     private UsagePolicyRuntime RequireUsagePolicyRuntime() => _usagePolicyRuntime ??
         throw new InvalidOperationException("The usage-policy runtime is not initialized.");
+
+    private static string GetLockReminderPropertyName(int minutes) => minutes switch
+    {
+        30 => nameof(VoiceReminder30Minutes),
+        10 => nameof(VoiceReminder10Minutes),
+        5 => nameof(VoiceReminder5Minutes),
+        1 => nameof(VoiceReminder1Minute),
+        _ => throw new ArgumentOutOfRangeException(nameof(minutes)),
+    };
+
+    private void NotifyLockReminderCanExecuteChanged()
+    {
+        _toggleVoiceReminder30MinutesCommand.NotifyCanExecuteChanged();
+        _toggleVoiceReminder10MinutesCommand.NotifyCanExecuteChanged();
+        _toggleVoiceReminder5MinutesCommand.NotifyCanExecuteChanged();
+        _toggleVoiceReminder1MinuteCommand.NotifyCanExecuteChanged();
+    }
 
     private void ReportSettingsFailure(Exception exception)
     {

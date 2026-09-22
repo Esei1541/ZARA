@@ -6,6 +6,14 @@ namespace Zara.Infrastructure.Windows.Tests;
 [TestClass]
 public sealed class DesktopRestartSettingsStoreTests
 {
+    private static readonly string[] SettingsPropertyNames =
+    [
+        "restartOnExitWhenUnlocked",
+        "voiceReminder30Minutes",
+        "voiceReminder10Minutes",
+        "voiceReminder5Minutes",
+        "voiceReminder1Minute",
+    ];
     private string _settingsDirectoryPath = null!;
 
     [TestInitialize]
@@ -28,34 +36,84 @@ public sealed class DesktopRestartSettingsStoreTests
     }
 
     [TestMethod]
-    public async Task MissingDocumentReturnsDefaultEnabled()
+    public async Task MissingDocumentReturnsEveryDefaultEnabled()
     {
         using var store = new WindowsDesktopRestartSettingsStore(_settingsDirectoryPath);
 
         DesktopRestartSettings settings = await store.LoadAsync();
 
         Assert.IsTrue(settings.RestartOnExitWhenUnlocked);
+        Assert.IsTrue(settings.VoiceReminder30Minutes);
+        Assert.IsTrue(settings.VoiceReminder10Minutes);
+        Assert.IsTrue(settings.VoiceReminder5Minutes);
+        Assert.IsTrue(settings.VoiceReminder1Minute);
         Assert.IsFalse(File.Exists(GetSettingsFilePath()));
     }
 
     [TestMethod]
-    public async Task DisabledSettingRoundTripsWithExactJsonProperty()
+    public async Task CompleteSettingsRoundTripWithExactJsonProperties()
     {
         using var store = new WindowsDesktopRestartSettingsStore(_settingsDirectoryPath);
         var expected = new DesktopRestartSettings
         {
             RestartOnExitWhenUnlocked = false,
+            VoiceReminder30Minutes = false,
+            VoiceReminder10Minutes = true,
+            VoiceReminder5Minutes = false,
+            VoiceReminder1Minute = true,
         };
 
         await store.SaveAsync(expected);
         DesktopRestartSettings actual = await store.LoadAsync();
 
-        Assert.IsFalse(actual.RestartOnExitWhenUnlocked);
+        Assert.AreEqual(expected, actual);
         using JsonDocument document = JsonDocument.Parse(
             await File.ReadAllTextAsync(GetSettingsFilePath()));
-        JsonProperty property = document.RootElement.EnumerateObject().Single();
-        Assert.AreEqual("restartOnExitWhenUnlocked", property.Name);
-        Assert.AreEqual(JsonValueKind.False, property.Value.ValueKind);
+        Dictionary<string, JsonValueKind> properties = document.RootElement
+            .EnumerateObject()
+            .ToDictionary(property => property.Name, property => property.Value.ValueKind);
+        CollectionAssert.AreEquivalent(
+            SettingsPropertyNames,
+            properties.Keys.ToArray());
+        Assert.AreEqual(JsonValueKind.False, properties["restartOnExitWhenUnlocked"]);
+        Assert.AreEqual(JsonValueKind.False, properties["voiceReminder30Minutes"]);
+        Assert.AreEqual(JsonValueKind.True, properties["voiceReminder10Minutes"]);
+        Assert.AreEqual(JsonValueKind.False, properties["voiceReminder5Minutes"]);
+        Assert.AreEqual(JsonValueKind.True, properties["voiceReminder1Minute"]);
+    }
+
+    [TestMethod]
+    public async Task ExistingDocumentWithoutReminderFieldsUsesEnabledDefaults()
+    {
+        await File.WriteAllTextAsync(
+            GetSettingsFilePath(),
+            """{"restartOnExitWhenUnlocked":false}""");
+        using var store = new WindowsDesktopRestartSettingsStore(_settingsDirectoryPath);
+
+        DesktopRestartSettings settings = await store.LoadAsync();
+
+        Assert.IsFalse(settings.RestartOnExitWhenUnlocked);
+        Assert.IsTrue(settings.VoiceReminder30Minutes);
+        Assert.IsTrue(settings.VoiceReminder10Minutes);
+        Assert.IsTrue(settings.VoiceReminder5Minutes);
+        Assert.IsTrue(settings.VoiceReminder1Minute);
+    }
+
+    [TestMethod]
+    public async Task PartiallySpecifiedReminderFieldsKeepOtherEnabledDefaults()
+    {
+        await File.WriteAllTextAsync(
+            GetSettingsFilePath(),
+            """{"voiceReminder10Minutes":false,"voiceReminder1Minute":false}""");
+        using var store = new WindowsDesktopRestartSettingsStore(_settingsDirectoryPath);
+
+        DesktopRestartSettings settings = await store.LoadAsync();
+
+        Assert.IsTrue(settings.RestartOnExitWhenUnlocked);
+        Assert.IsTrue(settings.VoiceReminder30Minutes);
+        Assert.IsFalse(settings.VoiceReminder10Minutes);
+        Assert.IsTrue(settings.VoiceReminder5Minutes);
+        Assert.IsFalse(settings.VoiceReminder1Minute);
     }
 
     [TestMethod]

@@ -53,19 +53,53 @@
           <TextBlock FontSize="18"
                      FontWeight="SemiBold"
                      Text="실행 설정" />
-          <CheckBox Grid.Row="2"
-                    Command="{Binding ToggleRestartSettingCommand}"
-                    Content="잠금이 해제된 상태에서도 프로그램이 종료되면 자동으로 다시 실행"
-                    IsChecked="{Binding RestartOnExitWhenUnlocked, Mode=OneWay}"
-                    IsEnabled="{Binding CanChangeSettings}"
-                    VerticalContentAlignment="Center" />
-          <StackPanel Grid.Row="3"
-                      Margin="0,12,0,0">
-            <TextBlock Foreground="#FF5C6470"
-                       TextWrapping="Wrap"
-                       Text="(시스템 트레이에서 직접 종료 시에는 실행되지 않습니다. 잠금 시각에는 설정과 관계 없이 실행됩니다.)" />
+          <StackPanel Grid.Row="2">
+            <CheckBox Command="{Binding ToggleRestartSettingCommand}"
+                      Content="잠금이 해제된 상태에서도 프로그램이 종료되면 자동으로 다시 실행"
+                      IsChecked="{Binding RestartOnExitWhenUnlocked, Mode=OneWay}"
+                      IsEnabled="{Binding CanChangeSettings}"
+                      VerticalContentAlignment="Center" />
             <TextBlock Margin="0,8,0,0"
                        Foreground="#FF5C6470"
+                       TextWrapping="Wrap"
+                       Text="(시스템 트레이에서 직접 종료 시에는 실행되지 않습니다. 잠금 시각에는 설정과 관계 없이 실행됩니다.)" />
+            <StackPanel Margin="0,24,0,0">
+              <TextBlock FontWeight="SemiBold"
+                         Text="음성 안내" />
+              <TextBlock Margin="0,6,0,0"
+                         Foreground="#FF5C6470"
+                         TextWrapping="Wrap"
+                         Text="잠금 시각이 다가오면 음성 안내를 출력합니다." />
+              <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
+                <CheckBox Margin="0,0,24,0"
+                          Command="{Binding ToggleVoiceReminder30MinutesCommand}"
+                          Content="30분 전"
+                          IsChecked="{Binding VoiceReminder30Minutes, Mode=OneWay}"
+                          IsEnabled="{Binding CanChangeSettings}"
+                          VerticalContentAlignment="Center" />
+                <CheckBox Margin="0,0,24,0"
+                          Command="{Binding ToggleVoiceReminder10MinutesCommand}"
+                          Content="10분 전"
+                          IsChecked="{Binding VoiceReminder10Minutes, Mode=OneWay}"
+                          IsEnabled="{Binding CanChangeSettings}"
+                          VerticalContentAlignment="Center" />
+                <CheckBox Margin="0,0,24,0"
+                          Command="{Binding ToggleVoiceReminder5MinutesCommand}"
+                          Content="5분 전"
+                          IsChecked="{Binding VoiceReminder5Minutes, Mode=OneWay}"
+                          IsEnabled="{Binding CanChangeSettings}"
+                          VerticalContentAlignment="Center" />
+                <CheckBox Command="{Binding ToggleVoiceReminder1MinuteCommand}"
+                          Content="1분 전"
+                          IsChecked="{Binding VoiceReminder1Minute, Mode=OneWay}"
+                          IsEnabled="{Binding CanChangeSettings}"
+                          VerticalContentAlignment="Center" />
+              </StackPanel>
+            </StackPanel>
+          </StackPanel>
+          <StackPanel Grid.Row="3"
+                      Margin="0,24,0,0">
+            <TextBlock Foreground="#FF5C6470"
                        TextWrapping="Wrap"
                        Text="사용 금지 시간에는 설정을 바꿀 수 없습니다. 시간 외 사용 예약이나 긴급 해제로 사용 중이어도 변경할 수 없습니다." />
           </StackPanel>

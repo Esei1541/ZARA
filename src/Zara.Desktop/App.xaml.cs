@@ -204,6 +204,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             new WindowsEmergencyPromptCatalog(),
             TimeProvider.System);
         await _usagePolicyRuntime.InitializeAsync().ConfigureAwait(true);
+        InitializeLockReminders();
         _usagePolicyRuntime.StateChanged += OnUsagePolicyRuntimeStateChanged;
         UpdateEmergencyUnlockAvailability(_usagePolicyRuntime.CurrentSnapshot);
         acknowledgedLease = _restartContinuity.CurrentAcknowledgedLease ?? acknowledgedLease;
@@ -216,6 +217,8 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             , RequestLockAsync,
             RequestDevelopmentUnlockAsync
 #endif
+            , lockReminderSettings: CurrentLockReminderSettings,
+            updateLockReminderSetting: UpdateLockReminderSettingAsync
             );
         SubscribeUsagePolicyNotifications();
 
@@ -286,6 +289,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private async Task RequestLockAsync()
     {
         ThrowIfShuttingDown();
+        StopLockReminders();
         RestartContinuityUseCase continuity = GetRestartContinuity();
 
         _ = await continuity
@@ -309,6 +313,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         LockRuntimeUseCase runtime = GetLockRuntime();
         if (lockRequired)
         {
+            StopLockReminders();
             _ = await continuity
                 .PublishLockConditionAsync(lockRequired: true, cancellationToken)
                 .ConfigureAwait(true);
@@ -496,12 +501,17 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         if (Dispatcher.CheckAccess())
         {
             UpdateEmergencyUnlockAvailability(snapshot);
+            UpdateLockReminders();
             return;
         }
 
         _ = Dispatcher.BeginInvoke(
             DispatcherPriority.Background,
-            new Action(() => UpdateEmergencyUnlockAvailability(snapshot)));
+            new Action(() =>
+            {
+                UpdateEmergencyUnlockAvailability(snapshot);
+                UpdateLockReminders();
+            }));
     }
 
     private void UpdateEmergencyUnlockAvailability(UsagePolicyRuntimeSnapshot snapshot)
@@ -560,13 +570,24 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     }
 
     private void OnWindowsTimeChanged(object? sender, EventArgs e) =>
-        QueueUsagePolicyOperation(runtime => runtime.RefreshAsync());
+        QueueUsagePolicyOperation(runtime =>
+        {
+            _lockReminders?.ResetObservation();
+            return runtime.RefreshAsync();
+        });
 
     private void OnWindowsPowerModeChanged(object? sender, PowerModeChangedEventArgs e) =>
         QueueUsagePolicyOperation(
-            e.Mode == PowerModes.Suspend
-                ? ClearEmergencyUnlockForPowerSuspendAsync
-                : runtime => runtime.RefreshAsync());
+            runtime =>
+            {
+                if (e.Mode is PowerModes.Suspend or PowerModes.Resume)
+                {
+                    _lockReminders?.ResetObservation();
+                }
+                return e.Mode == PowerModes.Suspend
+                    ? ClearEmergencyUnlockForPowerSuspendAsync(runtime)
+                    : runtime.RefreshAsync();
+            });
 
     private async Task ClearEmergencyUnlockForPowerSuspendAsync(UsagePolicyRuntime runtime)
     {
@@ -602,6 +623,19 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
 
     private async Task UpdateRestartSettingAsync(bool restartOnExitWhenUnlocked)
     {
+        await _executionSettingsGate.WaitAsync().ConfigureAwait(true);
+        try
+        {
+            await UpdateRestartSettingCoreAsync(restartOnExitWhenUnlocked).ConfigureAwait(true);
+        }
+        finally
+        {
+            _executionSettingsGate.Release();
+        }
+    }
+
+    private async Task UpdateRestartSettingCoreAsync(bool restartOnExitWhenUnlocked)
+    {
         ThrowIfShuttingDown();
         if (_usagePolicyRuntime is not null &&
             !_usagePolicyRuntime.CurrentSnapshot.Evaluation.IsSettingsChangeAllowed)
@@ -618,7 +652,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             throw new InvalidOperationException("The restart settings store is not initialized.");
         RestartContinuityUseCase continuity = GetRestartContinuity();
         DesktopRestartSettings previous = _restartSettings;
-        var updated = new DesktopRestartSettings(restartOnExitWhenUnlocked);
+        DesktopRestartSettings updated = previous with { RestartOnExitWhenUnlocked = restartOnExitWhenUnlocked };
 
         if (restartOnExitWhenUnlocked)
         {
@@ -935,6 +969,8 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
 
         CancelSystemShutdownWatchdog();
         UnsubscribeUsagePolicyNotifications();
+        StopLockReminders();
+        _lockReminders = null;
         DisposeRecoveryNotifications();
 
         if (_lockRuntime is not null)
@@ -1008,5 +1044,6 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
 
         _settingsStore?.Dispose();
         _settingsStore = null;
+        _executionSettingsGate.Dispose();
     }
 }

@@ -3,7 +3,7 @@ using System.Text.Json;
 namespace Zara.Infrastructure.Windows;
 
 /// <summary>
-/// Persists per-user desktop restart settings under the Windows local application-data folder.
+/// Persists per-user desktop execution settings under the Windows local application-data folder.
 /// </summary>
 /// <remarks>
 /// Reads and writes are serialized within the process. Writes use a temporary file in the target

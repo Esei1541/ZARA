@@ -4,7 +4,7 @@ namespace Zara.Application.UsagePolicy;
 
 /// <summary>
 /// Exposes the latest settings, evaluated time-rule state, pending emergency-input state, and
-/// display-only times calculated by the application runtime.
+/// upcoming lock and emergency-unlock times calculated by the application runtime.
 /// </summary>
 public sealed record UsagePolicyRuntimeSnapshot(
     UsagePolicySettings Settings,
