@@ -13,10 +13,12 @@ public sealed record UsagePolicySettings
     /// <param name="weeklySchedule">The seven weekday rules.</param>
     /// <param name="emergencyUnlock">The emergency-unlock configuration.</param>
     /// <param name="reservations">All registered time-outside-use reservations.</param>
+    /// <param name="emergencyUnlockUsage">Saved consumption, absent for older settings.</param>
     public UsagePolicySettings(
         WeeklyUsageRestrictionSchedule weeklySchedule,
         EmergencyUnlockSettings emergencyUnlock,
-        IEnumerable<OutOfHoursReservation> reservations)
+        IEnumerable<OutOfHoursReservation> reservations,
+        EmergencyUnlockUsage? emergencyUnlockUsage = null)
     {
         ArgumentNullException.ThrowIfNull(weeklySchedule);
         ArgumentNullException.ThrowIfNull(emergencyUnlock);
@@ -27,6 +29,7 @@ public sealed record UsagePolicySettings
 
         WeeklySchedule = weeklySchedule;
         EmergencyUnlock = emergencyUnlock;
+        EmergencyUnlockUsage = emergencyUnlockUsage ?? EmergencyUnlockUsage.Empty;
         Reservations = Array.AsReadOnly(copiedReservations);
     }
 
@@ -45,6 +48,9 @@ public sealed record UsagePolicySettings
     /// <summary>Gets the emergency-unlock configuration.</summary>
     public EmergencyUnlockSettings EmergencyUnlock { get; }
 
+    /// <summary>Gets the saved weekly emergency-unlock consumption.</summary>
+    public EmergencyUnlockUsage EmergencyUnlockUsage { get; }
+
     /// <summary>Gets the immutable registered-reservation snapshot.</summary>
     public ReadOnlyCollection<OutOfHoursReservation> Reservations { get; }
 
@@ -52,19 +58,23 @@ public sealed record UsagePolicySettings
     /// Returns a copy with a different complete weekday schedule.
     /// </summary>
     public UsagePolicySettings WithWeeklySchedule(WeeklyUsageRestrictionSchedule weeklySchedule) =>
-        new(weeklySchedule, EmergencyUnlock, Reservations);
+        new(weeklySchedule, EmergencyUnlock, Reservations, EmergencyUnlockUsage);
 
     /// <summary>
     /// Returns a copy with a different emergency-unlock configuration.
     /// </summary>
     public UsagePolicySettings WithEmergencyUnlock(EmergencyUnlockSettings emergencyUnlock) =>
-        new(WeeklySchedule, emergencyUnlock, Reservations);
+        new(WeeklySchedule, emergencyUnlock, Reservations, EmergencyUnlockUsage);
 
     /// <summary>
     /// Returns a copy with a different complete reservation list.
     /// </summary>
     public UsagePolicySettings WithReservations(IEnumerable<OutOfHoursReservation> reservations) =>
-        new(WeeklySchedule, EmergencyUnlock, reservations);
+        new(WeeklySchedule, EmergencyUnlock, reservations, EmergencyUnlockUsage);
+
+    /// <summary>Returns a copy retaining configuration and replacing only saved consumption.</summary>
+    public UsagePolicySettings WithEmergencyUnlockUsage(EmergencyUnlockUsage usage) =>
+        new(WeeklySchedule, EmergencyUnlock, Reservations, usage);
 
     private static void ValidateReservations(OutOfHoursReservation[] reservations)
     {

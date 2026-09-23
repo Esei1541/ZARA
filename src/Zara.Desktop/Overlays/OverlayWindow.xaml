@@ -41,6 +41,13 @@
                    Text="사용 가능한 시각이 되면 잠금이 해제됩니다. 주무세요!"
                    TextAlignment="Center"
                    TextWrapping="Wrap" />
+        <TextBlock x:Name="EmergencyUnlockRemainingText"
+                   Margin="0,16,0,0"
+                   HorizontalAlignment="Center"
+                   Foreground="#FFD1D6DE"
+                   FontSize="16"
+                   FontWeight="SemiBold"
+                   Visibility="Collapsed" />
         <WrapPanel x:Name="LockActions"
                    Margin="0,28,0,0"
                    HorizontalAlignment="Center"

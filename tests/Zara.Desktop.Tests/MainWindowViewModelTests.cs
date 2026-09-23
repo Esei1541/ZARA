@@ -473,6 +473,202 @@ public sealed class MainWindowViewModelTests
     }
 
     [STATestMethod]
+    public async Task WeeklyEmergencyLimitSettingsUseSundayFirstAndSaveIndependentlyOfScheduleEdits()
+    {
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        using var runtime = CreateRuntime(
+            store,
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+
+        CollectionAssert.AreEqual(
+            new[] { DayOfWeek.Sunday, DayOfWeek.Monday, DayOfWeek.Tuesday,
+                DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday,
+                DayOfWeek.Saturday },
+            viewModel.EmergencyWeeklyResetDays.Select(day => day.Key).ToArray());
+        Assert.AreEqual(DayOfWeek.Sunday, viewModel.EmergencyWeeklyResetDay);
+
+        viewModel.WeekdayRestrictions.Single(day => day.DayOfWeek == DayOfWeek.Monday)
+            .IsRestrictionEnabled = true;
+        viewModel.EmergencyWeeklyLimitEnabled = true;
+        viewModel.EmergencyWeeklyResetDay = DayOfWeek.Friday;
+        viewModel.EmergencyWeeklyMaximumCountText = "7";
+
+        await viewModel.SaveEmergencyUnlockSettingsAsync();
+
+        Assert.IsTrue(store.Settings.EmergencyUnlock.WeeklyLimitEnabled);
+        Assert.AreEqual(DayOfWeek.Friday, store.Settings.EmergencyUnlock.WeeklyResetDay);
+        Assert.AreEqual(7, store.Settings.EmergencyUnlock.WeeklyMaximumCount);
+        Assert.IsFalse(store.Settings.WeeklySchedule.Monday.IsEnabled);
+    }
+
+    [STATestMethod]
+    public async Task DisabledWeeklyEmergencyLimitIgnoresInvalidEditorsAndRestoresSavedValues()
+    {
+        var storedEmergency = new EmergencyUnlockSettings(
+            durationMinutes: 10,
+            sentenceCount: 3,
+            weeklyLimitEnabled: true,
+            weeklyResetDay: DayOfWeek.Tuesday,
+            weeklyMaximumCount: 5);
+        var store = new RecordingStore(UsagePolicySettings.Default.WithEmergencyUnlock(
+            storedEmergency));
+        using var runtime = CreateRuntime(
+            store,
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+
+        viewModel.EmergencyWeeklyLimitEnabled = false;
+        viewModel.EmergencyWeeklyResetDay = null;
+        viewModel.EmergencyWeeklyMaximumCountText = "invalid";
+        await viewModel.SaveEmergencyUnlockSettingsAsync();
+
+        Assert.IsFalse(store.Settings.EmergencyUnlock.WeeklyLimitEnabled);
+        Assert.AreEqual(DayOfWeek.Tuesday, store.Settings.EmergencyUnlock.WeeklyResetDay);
+        Assert.AreEqual(5, store.Settings.EmergencyUnlock.WeeklyMaximumCount);
+        Assert.AreEqual(DayOfWeek.Tuesday, viewModel.EmergencyWeeklyResetDay);
+        Assert.AreEqual("5", viewModel.EmergencyWeeklyMaximumCountText);
+    }
+
+    [STATestMethod]
+    public async Task WeeklyEmergencyLimitShowsRemainingCountInCountdownAndLockedStatus()
+    {
+        var timeProvider = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero));
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new TimeOnly(9, 0),
+            new TimeOnly(10, 0)).WithEmergencyUnlock(new EmergencyUnlockSettings(
+                durationMinutes: 10,
+                sentenceCount: 3,
+                weeklyLimitEnabled: true,
+                weeklyResetDay: DayOfWeek.Sunday,
+                weeklyMaximumCount: 2));
+        using var runtime = CreateRuntime(new RecordingStore(settings), timeProvider);
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+
+        Assert.AreEqual(
+            "다음 잠금까지 01:00:00 남았습니다. (남은 긴급 해제 2회)",
+            viewModel.UsagePolicyStatusMessage);
+
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 9, 0, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+
+        Assert.AreEqual(
+            "현재는 사용 금지 시간입니다. 설정을 바꿀 수 없습니다. (남은 긴급 해제 2회)",
+            viewModel.UsagePolicyStatusMessage);
+    }
+
+    [STATestMethod]
+    [DataRow("")]
+    [DataRow("0")]
+    [DataRow("100")]
+    [DataRow("invalid")]
+    public async Task EnabledWeeklyLimitRejectsInvalidMaximumCountWithSpecificMessage(string input)
+    {
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        using var runtime = CreateRuntime(
+            store,
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        viewModel.EmergencyWeeklyLimitEnabled = true;
+        viewModel.EmergencyWeeklyMaximumCountText = input;
+
+        ArgumentException exception = await Assert.ThrowsExactlyAsync<ArgumentException>(
+            () => viewModel.SaveEmergencyUnlockSettingsAsync());
+
+        Assert.AreEqual("주간 최대 횟수는 1~99 사이의 숫자로 입력하세요.", exception.Message);
+        Assert.AreEqual(EmergencyUnlockSettings.Default, store.Settings.EmergencyUnlock);
+    }
+
+    [STATestMethod]
+    public async Task EnabledWeeklyLimitRequiresAResetDay()
+    {
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        using var runtime = CreateRuntime(
+            store,
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        viewModel.EmergencyWeeklyLimitEnabled = true;
+        viewModel.EmergencyWeeklyResetDay = null;
+
+        ArgumentException exception = await Assert.ThrowsExactlyAsync<ArgumentException>(
+            () => viewModel.SaveEmergencyUnlockSettingsAsync());
+
+        Assert.AreEqual("초기화 요일을 선택하세요.", exception.Message);
+        Assert.AreEqual(EmergencyUnlockSettings.Default, store.Settings.EmergencyUnlock);
+    }
+
+    [STATestMethod]
+    public async Task WeeklyLimitEditsSurviveRefreshUntilResetRestoresSavedValues()
+    {
+        var saved = new EmergencyUnlockSettings(
+            durationMinutes: 10,
+            sentenceCount: 3,
+            weeklyLimitEnabled: true,
+            weeklyResetDay: DayOfWeek.Tuesday,
+            weeklyMaximumCount: 5);
+        var timeProvider = new ManualTimeProvider(
+            new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero));
+        using var runtime = CreateRuntime(
+            new RecordingStore(UsagePolicySettings.Default.WithEmergencyUnlock(saved)),
+            timeProvider);
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        viewModel.EmergencyWeeklyLimitEnabled = false;
+        viewModel.EmergencyWeeklyResetDay = DayOfWeek.Friday;
+        viewModel.EmergencyWeeklyMaximumCountText = "7";
+
+        timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 8, 1, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+
+        Assert.IsFalse(viewModel.EmergencyWeeklyLimitEnabled);
+        Assert.AreEqual(DayOfWeek.Friday, viewModel.EmergencyWeeklyResetDay);
+        Assert.AreEqual("7", viewModel.EmergencyWeeklyMaximumCountText);
+
+        viewModel.ResetEmergencyUnlockEdits();
+
+        Assert.IsTrue(viewModel.EmergencyWeeklyLimitEnabled);
+        Assert.AreEqual(DayOfWeek.Tuesday, viewModel.EmergencyWeeklyResetDay);
+        Assert.AreEqual("5", viewModel.EmergencyWeeklyMaximumCountText);
+    }
+
+    [STATestMethod]
+    public async Task LastEmergencyUnlockShowsZeroRemainingWhileUnlockIsActive()
+    {
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new TimeOnly(9, 0),
+            new TimeOnly(10, 0)).WithEmergencyUnlock(new EmergencyUnlockSettings(
+                durationMinutes: 10,
+                sentenceCount: 0,
+                weeklyLimitEnabled: true,
+                weeklyResetDay: DayOfWeek.Sunday,
+                weeklyMaximumCount: 1));
+        using var runtime = CreateRuntime(
+            new RecordingStore(settings),
+            new ManualTimeProvider(
+                new DateTimeOffset(2026, 8, 10, 9, 30, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+
+        EmergencyUnlockStartResult started = await runtime.StartEmergencyUnlockAsync();
+
+        Assert.IsTrue(started.StartedImmediately);
+        Assert.AreEqual(0, runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+        Assert.AreEqual(
+            "긴급 해제가 적용 중입니다. 사용 금지 시간이라 설정은 바꿀 수 없습니다. (남은 긴급 해제 0회)",
+            viewModel.UsagePolicyStatusMessage);
+    }
+
+    [STATestMethod]
     public async Task ResetRestoresTheLatestSavedValuesInsteadOfProductDefaults()
     {
         var store = new RecordingStore(UsagePolicySettings.Default);

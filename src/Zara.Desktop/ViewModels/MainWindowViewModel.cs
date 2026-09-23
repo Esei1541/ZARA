@@ -31,6 +31,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         .ToString(CultureInfo.InvariantCulture);
     private string _emergencySentenceCountText = EmergencyUnlockSettings.Default.SentenceCount
         .ToString(CultureInfo.InvariantCulture);
+    private bool _emergencyWeeklyLimitEnabled = EmergencyUnlockSettings.Default.WeeklyLimitEnabled;
+    private DayOfWeek? _emergencyWeeklyResetDay = EmergencyUnlockSettings.Default.WeeklyResetDay;
+    private string _emergencyWeeklyMaximumCountText =
+        EmergencyUnlockSettings.Default.WeeklyMaximumCount.ToString(CultureInfo.InvariantCulture);
     private string _usagePolicyStatusMessage = "시간 규칙을 불러오는 중입니다.";
     private WeeklyUsageRestrictionSchedule? _loadedWeeklySchedule;
     private EmergencyUnlockSettings? _loadedEmergencyUnlockSettings;
@@ -70,6 +74,16 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             new(DayOfWeek.Saturday, "토요일"),
             new(DayOfWeek.Sunday, "일요일"),
         ]);
+        EmergencyWeeklyResetDays =
+        [
+            new(DayOfWeek.Sunday, "일요일"),
+            new(DayOfWeek.Monday, "월요일"),
+            new(DayOfWeek.Tuesday, "화요일"),
+            new(DayOfWeek.Wednesday, "수요일"),
+            new(DayOfWeek.Thursday, "목요일"),
+            new(DayOfWeek.Friday, "금요일"),
+            new(DayOfWeek.Saturday, "토요일"),
+        ];
         Reservations = new ObservableCollection<ReservationRowViewModel>();
         ReservationsView = CollectionViewSource.GetDefaultView(Reservations);
         ReservationsView.SortDescriptions.Add(
@@ -133,6 +147,8 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>Gets the weekday editors shown on the usage-ban tab.</summary>
     public ObservableCollection<DailyUsageRestrictionViewModel> WeekdayRestrictions { get; }
 
+    public IReadOnlyList<KeyValuePair<DayOfWeek, string>> EmergencyWeeklyResetDays { get; }
+
     /// <summary>Gets the sortable reservation rows.</summary>
     public ObservableCollection<ReservationRowViewModel> Reservations { get; }
 
@@ -191,6 +207,24 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     {
         get => _emergencySentenceCountText;
         set => SetField(ref _emergencySentenceCountText, value);
+    }
+
+    public bool EmergencyWeeklyLimitEnabled
+    {
+        get => _emergencyWeeklyLimitEnabled;
+        set => SetField(ref _emergencyWeeklyLimitEnabled, value);
+    }
+
+    public DayOfWeek? EmergencyWeeklyResetDay
+    {
+        get => _emergencyWeeklyResetDay;
+        set => SetField(ref _emergencyWeeklyResetDay, value);
+    }
+
+    public string EmergencyWeeklyMaximumCountText
+    {
+        get => _emergencyWeeklyMaximumCountText;
+        set => SetField(ref _emergencyWeeklyMaximumCountText, value);
     }
 
     /// <summary>Gets a read-only explanation of the current evaluated time-rule state.</summary>
@@ -290,10 +324,19 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                 EmergencySentenceCountText,
                 "긴급 해제 문장 수",
                 EmergencyUnlockSettings.MinimumSentenceCount,
-                EmergencyUnlockSettings.MaximumSentenceCount));
+                EmergencyUnlockSettings.MaximumSentenceCount),
+            EmergencyWeeklyLimitEnabled,
+            EmergencyWeeklyLimitEnabled
+                ? EmergencyWeeklyResetDay ?? throw new ArgumentException("초기화 요일을 선택하세요.")
+                : _loadedEmergencyUnlockSettings?.WeeklyResetDay ?? DayOfWeek.Sunday,
+            EmergencyWeeklyLimitEnabled
+                ? ParseWeeklyMaximumCount(EmergencyWeeklyMaximumCountText)
+                : _loadedEmergencyUnlockSettings?.WeeklyMaximumCount ??
+                    EmergencyUnlockSettings.Default.WeeklyMaximumCount);
         await RequireUsagePolicyRuntime()
             .UpdateEmergencyUnlockSettingsAsync(emergencyUnlock)
             .ConfigureAwait(true);
+        ResetEmergencyUnlockEdits();
         RequestNotification(
             "긴급 해제",
             "긴급 해제 설정을 저장했습니다.",
@@ -331,6 +374,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         EmergencyDurationMinutesText = emergencyUnlock.DurationMinutes
             .ToString(CultureInfo.InvariantCulture);
         EmergencySentenceCountText = emergencyUnlock.SentenceCount
+            .ToString(CultureInfo.InvariantCulture);
+        EmergencyWeeklyLimitEnabled = emergencyUnlock.WeeklyLimitEnabled;
+        EmergencyWeeklyResetDay = emergencyUnlock.WeeklyResetDay;
+        EmergencyWeeklyMaximumCountText = emergencyUnlock.WeeklyMaximumCount
             .ToString(CultureInfo.InvariantCulture);
         _loadedEmergencyUnlockSettings = emergencyUnlock;
     }
@@ -393,6 +440,10 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
                 .ToString(CultureInfo.InvariantCulture);
             EmergencySentenceCountText = snapshot.Settings.EmergencyUnlock.SentenceCount
                 .ToString(CultureInfo.InvariantCulture);
+            EmergencyWeeklyLimitEnabled = snapshot.Settings.EmergencyUnlock.WeeklyLimitEnabled;
+            EmergencyWeeklyResetDay = snapshot.Settings.EmergencyUnlock.WeeklyResetDay;
+            EmergencyWeeklyMaximumCountText = snapshot.Settings.EmergencyUnlock.WeeklyMaximumCount
+                .ToString(CultureInfo.InvariantCulture);
             _loadedEmergencyUnlockSettings = snapshot.Settings.EmergencyUnlock;
         }
 
@@ -433,39 +484,63 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     private static string GetUsagePolicyStatusMessage(UsagePolicyRuntimeSnapshot snapshot)
     {
         UsagePolicyEvaluation evaluation = snapshot.Evaluation;
+        string message;
         if (!evaluation.IsWithinUsageBan)
         {
             DateTime? nextLockStart = snapshot.NextLockStartLocalTime;
             if (nextLockStart is null)
             {
-                return "지금은 설정된 사용 금지 시각이 없습니다.";
+                message = "지금은 설정된 사용 금지 시각이 없습니다.";
             }
+            else
+            {
+                long remainingSeconds = Math.Max(
+                    0,
+                    (long)Math.Ceiling(
+                        (nextLockStart.Value - snapshot.EvaluatedLocalTime).TotalSeconds));
+                long remainingHours = remainingSeconds / 3600;
+                long remainingMinutes = remainingSeconds % 3600 / 60;
+                long remainingSecondsPart = remainingSeconds % 60;
+                message = string.Create(
+                    CultureInfo.InvariantCulture,
+                    $"다음 잠금까지 {remainingHours:00}:{remainingMinutes:00}:{remainingSecondsPart:00} 남았습니다.");
+            }
+        }
+        else if (evaluation.HasActiveEmergencyUnlock)
+        {
+            message = "긴급 해제가 적용 중입니다. 사용 금지 시간이라 설정은 바꿀 수 없습니다.";
+        }
+        else if (evaluation.HasActiveReservation)
+        {
+            message = "시간 외 사용 예약이 적용 중입니다. 사용 금지 시간이라 설정은 바꿀 수 없습니다.";
+        }
+        else
+        {
+            message = evaluation.LockRequired
+                ? "현재는 사용 금지 시간입니다. 설정을 바꿀 수 없습니다."
+                : "현재 설정 변경이 제한되어 있습니다.";
+        }
 
-            long remainingSeconds = Math.Max(
-                0,
-                (long)Math.Ceiling(
-                    (nextLockStart.Value - snapshot.EvaluatedLocalTime).TotalSeconds));
-            long remainingHours = remainingSeconds / 3600;
-            long remainingMinutes = remainingSeconds % 3600 / 60;
-            long remainingSecondsPart = remainingSeconds % 60;
-            return string.Create(
+        return snapshot.EmergencyUnlockRemainingCount is int remainingCount
+            ? string.Create(CultureInfo.InvariantCulture,
+                $"{message} (남은 긴급 해제 {remainingCount}회)")
+            : message;
+    }
+
+    private static int ParseWeeklyMaximumCount(string value)
+    {
+        if (!int.TryParse(
+                value,
+                NumberStyles.None,
                 CultureInfo.InvariantCulture,
-                $"다음 잠금까지 {remainingHours:00}:{remainingMinutes:00}:{remainingSecondsPart:00} 남았습니다.");
-        }
-
-        if (evaluation.HasActiveEmergencyUnlock)
+                out int maximumCount) ||
+            maximumCount < EmergencyUnlockSettings.MinimumWeeklyMaximumCount ||
+            maximumCount > EmergencyUnlockSettings.MaximumWeeklyMaximumCount)
         {
-            return "긴급 해제가 적용 중입니다. 사용 금지 시간이라 설정은 바꿀 수 없습니다.";
+            throw new ArgumentException("주간 최대 횟수는 1~99 사이의 숫자로 입력하세요.");
         }
 
-        if (evaluation.HasActiveReservation)
-        {
-            return "시간 외 사용 예약이 적용 중입니다. 사용 금지 시간이라 설정은 바꿀 수 없습니다.";
-        }
-
-        return evaluation.LockRequired
-            ? "현재는 사용 금지 시간입니다. 설정을 바꿀 수 없습니다."
-            : "현재 설정 변경이 제한되어 있습니다.";
+        return maximumCount;
     }
 
     private static int ParseEmergencySetting(

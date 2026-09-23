@@ -1,6 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Windows;
+using System.Windows.Media;
+using Brushes = System.Windows.Media.Brushes;
+using Color = System.Windows.Media.Color;
 #if DEBUG
 using Button = System.Windows.Controls.Button;
 #endif
@@ -12,6 +15,15 @@ namespace Zara.Desktop.Overlays;
 /// </summary>
 internal sealed partial class OverlayWindow : Window
 {
+    private static readonly SolidColorBrush RemainingNormalBrush = CreateRemainingNormalBrush();
+
+    private static SolidColorBrush CreateRemainingNormalBrush()
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(209, 214, 222));
+        brush.Freeze();
+        return brush;
+    }
+
     private readonly Func<Task> _requestSystemShutdown;
     private readonly Func<Task> _requestEmergencyUnlock;
 #if DEBUG
@@ -66,6 +78,20 @@ internal sealed partial class OverlayWindow : Window
     internal void SetEmergencyUnlockEnabled(bool isEnabled) =>
         EmergencyUnlockButton.IsEnabled = isEnabled;
 
+    internal void SetEmergencyUnlockRemainingCount(int? remainingCount)
+    {
+        EmergencyUnlockRemainingText.Visibility = remainingCount is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        if (remainingCount is int count)
+        {
+            EmergencyUnlockRemainingText.Text = $"남은 긴급 해제 {count}회";
+            EmergencyUnlockRemainingText.Foreground = count == 0
+                ? Brushes.IndianRed
+                : RemainingNormalBrush;
+        }
+    }
+
     internal void SetRecoveryActive(bool isActive) =>
         RecoveryStatus.Visibility = isActive ? Visibility.Visible : Visibility.Collapsed;
 
@@ -117,7 +143,14 @@ internal sealed partial class OverlayWindow : Window
         catch (Exception exception)
         {
             Trace.TraceError("The emergency unlock request failed: {0}", exception);
-            EmergencyUnlockButton.IsEnabled = true;
+            _ = System.Windows.MessageBox.Show(
+                this,
+                exception is InvalidOperationException
+                    ? exception.Message
+                    : "긴급 해제를 시작하지 못했습니다. 다시 시도하세요.",
+                "긴급 해제",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
         }
     }
 

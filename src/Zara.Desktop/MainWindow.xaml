@@ -33,6 +33,7 @@
                    Text="ZARA" />
         <TextBlock Margin="0,2,0,0"
                    Foreground="#FF5C6470"
+                   TextWrapping="Wrap"
                    Text="{Binding UsagePolicyStatusMessage}" />
       </StackPanel>
     </DockPanel>
@@ -194,6 +195,16 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="20" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="24" />
+            <RowDefinition Height="1" />
+            <RowDefinition Height="20" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="16" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="8" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
           </Grid.RowDefinitions>
@@ -238,7 +249,52 @@
                        VerticalAlignment="Center"
                        Text="개 (0~99개, 0개면 문장 입력 없이 해제)" />
           </StackPanel>
-          <Button Grid.Row="4"
+          <Border Grid.Row="4"
+                  Grid.ColumnSpan="2"
+                  Background="#FFDDE1E6" />
+          <CheckBox Grid.Row="6"
+                    Grid.ColumnSpan="2"
+                    Content="긴급 해제 횟수 제한"
+                    IsChecked="{Binding EmergencyWeeklyLimitEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    VerticalContentAlignment="Center" />
+          <TextBlock Grid.Row="8"
+                     VerticalAlignment="Center"
+                     Text="초기화 요일" />
+          <ComboBox Grid.Row="8"
+                    Grid.Column="1"
+                    Width="128"
+                    HorizontalAlignment="Left"
+                    AutomationProperties.Name="초기화 요일"
+                    DisplayMemberPath="Value"
+                    IsEnabled="{Binding EmergencyWeeklyLimitEnabled}"
+                    ItemsSource="{Binding EmergencyWeeklyResetDays}"
+                    SelectedValue="{Binding EmergencyWeeklyResetDay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                    SelectedValuePath="Key" />
+          <TextBlock Grid.Row="10"
+                     VerticalAlignment="Center"
+                     Text="주간 최대 횟수" />
+          <StackPanel Grid.Row="10"
+                      Grid.Column="1"
+                      IsEnabled="{Binding EmergencyWeeklyLimitEnabled}"
+                      Orientation="Horizontal">
+            <TextBox Width="100"
+                     MaxLength="2"
+                     AutomationProperties.Name="주간 최대 횟수"
+                     behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
+                     HorizontalContentAlignment="Right"
+                     InputMethod.IsInputMethodEnabled="False"
+                     InputScope="Number"
+                     Text="{Binding EmergencyWeeklyMaximumCountText, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Margin="8,0,0,0"
+                       VerticalAlignment="Center"
+                       Text="회 (1~99회)" />
+          </StackPanel>
+          <TextBlock Grid.Row="12"
+                     Grid.ColumnSpan="2"
+                     Foreground="#FF5C6470"
+                     Text="선택한 요일 자정에 사용 횟수가 초기화됩니다."
+                     TextWrapping="Wrap" />
+          <Button Grid.Row="14"
                   Grid.ColumnSpan="2"
                   Width="128"
                   Height="36"
