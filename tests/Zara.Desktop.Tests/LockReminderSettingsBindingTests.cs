@@ -14,20 +14,20 @@ public sealed class LockReminderSettingsBindingTests
 {
     private static readonly string[] ReminderSectionText =
         ["음성 안내", "잠금 시각이 다가오면 음성 안내를 출력합니다."];
-    private static readonly (string Content, string Value, string Command)[] ExpectedBindings =
+    private static readonly (string Content, string Value)[] ExpectedBindings =
     [
-        ("30분 전", "VoiceReminder30Minutes", "ToggleVoiceReminder30MinutesCommand"),
-        ("10분 전", "VoiceReminder10Minutes", "ToggleVoiceReminder10MinutesCommand"),
-        ("5분 전", "VoiceReminder5Minutes", "ToggleVoiceReminder5MinutesCommand"),
-        ("1분 전", "VoiceReminder1Minute", "ToggleVoiceReminder1MinuteCommand"),
+        ("30분 전", "VoiceReminder30Minutes"),
+        ("10분 전", "VoiceReminder10Minutes"),
+        ("5분 전", "VoiceReminder5Minutes"),
+        ("1분 전", "VoiceReminder1Minute"),
     ];
 
     [STATestMethod]
-    public void MainWindowBindsEveryReminderCheckboxOneWayToItsCommandAndSettingsGate()
+    public void MainWindowBindsEveryReminderCheckboxToEditableDraft()
     {
         using var viewModel = new MainWindowViewModel(
             restartOnExitWhenUnlocked: true,
-            updateRestartSetting: _ => Task.CompletedTask
+            saveExecutionSettings: (_, _) => Task.CompletedTask
 #if DEBUG
             , requestLock: () => Task.CompletedTask,
             requestDevelopmentUnlock: () => Task.CompletedTask
@@ -36,8 +36,7 @@ public sealed class LockReminderSettingsBindingTests
                 ThirtyMinutes: false,
                 TenMinutes: true,
                 FiveMinutes: false,
-                OneMinute: true),
-            updateLockReminderSetting: (_, _) => Task.CompletedTask
+                OneMinute: true)
             );
         var window = CreateWindow(viewModel);
 
@@ -49,24 +48,37 @@ public sealed class LockReminderSettingsBindingTests
             window.UpdateLayout();
             Dictionary<string, CheckBox> reminderCheckBoxes = GetReminderCheckBoxes(window);
 
+            CheckBox restartCheckBox = FindVisualDescendants<CheckBox>(window)
+                .Single(checkBox => Equals(checkBox.Content,
+                    "잠금이 해제된 상태에서도 프로그램이 종료되면 자동으로 다시 실행"));
+            Binding restartValue = BindingOperations.GetBinding(
+                restartCheckBox, ToggleButton.IsCheckedProperty)!;
+            Binding restartEnabled = BindingOperations.GetBinding(
+                restartCheckBox, UIElement.IsEnabledProperty)!;
+            Assert.AreEqual("RestartOnExitWhenUnlocked", restartValue.Path.Path);
+            Assert.AreEqual(BindingMode.TwoWay, restartValue.Mode);
+            Assert.IsNull(BindingOperations.GetBinding(restartCheckBox, ButtonBase.CommandProperty));
+            Assert.AreEqual("CanEditExecutionSettings", restartEnabled.Path.Path);
+            Button saveButton = FindVisualDescendants<Button>(window)
+                .Single(button => Equals(button.Content, "설정 저장") &&
+                    button.Command == viewModel.SaveExecutionSettingsCommand);
+            Assert.IsNotNull(saveButton);
+
             Assert.HasCount(4, reminderCheckBoxes);
-            foreach ((string content, string value, string command) in ExpectedBindings)
+            foreach ((string content, string value) in ExpectedBindings)
             {
                 CheckBox checkBox = reminderCheckBoxes[content];
                 Binding valueBinding = BindingOperations.GetBinding(
                     checkBox,
                     ToggleButton.IsCheckedProperty)!;
-                Binding commandBinding = BindingOperations.GetBinding(
-                    checkBox,
-                    ButtonBase.CommandProperty)!;
                 Binding enabledBinding = BindingOperations.GetBinding(
                     checkBox,
                     UIElement.IsEnabledProperty)!;
 
                 Assert.AreEqual(value, valueBinding.Path.Path);
-                Assert.AreEqual(BindingMode.OneWay, valueBinding.Mode);
-                Assert.AreEqual(command, commandBinding.Path.Path);
-                Assert.AreEqual("CanChangeSettings", enabledBinding.Path.Path);
+                Assert.AreEqual(BindingMode.TwoWay, valueBinding.Mode);
+                Assert.IsNull(BindingOperations.GetBinding(checkBox, ButtonBase.CommandProperty));
+                Assert.AreEqual("CanEditExecutionSettings", enabledBinding.Path.Path);
             }
 
             Assert.IsFalse(reminderCheckBoxes["30분 전"].IsChecked);
@@ -118,13 +130,12 @@ public sealed class LockReminderSettingsBindingTests
         using var viewModel = new MainWindowViewModel(
             runtime,
             restartOnExitWhenUnlocked: true,
-            updateRestartSetting: _ => Task.CompletedTask
+            saveExecutionSettings: (_, _) => Task.CompletedTask
 #if DEBUG
             , requestLock: () => Task.CompletedTask,
             requestDevelopmentUnlock: () => Task.CompletedTask
 #endif
-            , lockReminderSettings: LockReminderSettings.Default,
-            updateLockReminderSetting: (_, _) => Task.CompletedTask
+            , lockReminderSettings: LockReminderSettings.Default
             );
         var window = CreateWindow(viewModel);
 

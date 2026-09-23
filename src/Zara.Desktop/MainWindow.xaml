@@ -41,7 +41,7 @@
     <TabControl x:Name="MainTabs"
                 Grid.Row="2"
                 SelectionChanged="MainTabs_SelectionChanged">
-      <TabItem Header="기본">
+      <TabItem x:Name="BasicSettingsTab" Header="기본">
         <Grid Margin="22">
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -55,10 +55,9 @@
                      FontWeight="SemiBold"
                      Text="실행 설정" />
           <StackPanel Grid.Row="2">
-            <CheckBox Command="{Binding ToggleRestartSettingCommand}"
-                      Content="잠금이 해제된 상태에서도 프로그램이 종료되면 자동으로 다시 실행"
-                      IsChecked="{Binding RestartOnExitWhenUnlocked, Mode=OneWay}"
-                      IsEnabled="{Binding CanChangeSettings}"
+            <CheckBox Content="잠금이 해제된 상태에서도 프로그램이 종료되면 자동으로 다시 실행"
+                      IsChecked="{Binding RestartOnExitWhenUnlocked, Mode=TwoWay}"
+                      IsEnabled="{Binding CanEditExecutionSettings}"
                       VerticalContentAlignment="Center" />
             <TextBlock Margin="0,8,0,0"
                        Foreground="#FF5C6470"
@@ -73,27 +72,23 @@
                          Text="잠금 시각이 다가오면 음성 안내를 출력합니다." />
               <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
                 <CheckBox Margin="0,0,24,0"
-                          Command="{Binding ToggleVoiceReminder30MinutesCommand}"
                           Content="30분 전"
-                          IsChecked="{Binding VoiceReminder30Minutes, Mode=OneWay}"
-                          IsEnabled="{Binding CanChangeSettings}"
+                          IsChecked="{Binding VoiceReminder30Minutes, Mode=TwoWay}"
+                          IsEnabled="{Binding CanEditExecutionSettings}"
                           VerticalContentAlignment="Center" />
                 <CheckBox Margin="0,0,24,0"
-                          Command="{Binding ToggleVoiceReminder10MinutesCommand}"
                           Content="10분 전"
-                          IsChecked="{Binding VoiceReminder10Minutes, Mode=OneWay}"
-                          IsEnabled="{Binding CanChangeSettings}"
+                          IsChecked="{Binding VoiceReminder10Minutes, Mode=TwoWay}"
+                          IsEnabled="{Binding CanEditExecutionSettings}"
                           VerticalContentAlignment="Center" />
                 <CheckBox Margin="0,0,24,0"
-                          Command="{Binding ToggleVoiceReminder5MinutesCommand}"
                           Content="5분 전"
-                          IsChecked="{Binding VoiceReminder5Minutes, Mode=OneWay}"
-                          IsEnabled="{Binding CanChangeSettings}"
+                          IsChecked="{Binding VoiceReminder5Minutes, Mode=TwoWay}"
+                          IsEnabled="{Binding CanEditExecutionSettings}"
                           VerticalContentAlignment="Center" />
-                <CheckBox Command="{Binding ToggleVoiceReminder1MinuteCommand}"
-                          Content="1분 전"
-                          IsChecked="{Binding VoiceReminder1Minute, Mode=OneWay}"
-                          IsEnabled="{Binding CanChangeSettings}"
+                <CheckBox Content="1분 전"
+                          IsChecked="{Binding VoiceReminder1Minute, Mode=TwoWay}"
+                          IsEnabled="{Binding CanEditExecutionSettings}"
                           VerticalContentAlignment="Center" />
               </StackPanel>
             </StackPanel>
@@ -107,7 +102,13 @@
           <StackPanel x:Name="ShellActions"
                       Grid.Row="4"
                       HorizontalAlignment="Right"
-                      Orientation="Horizontal" />
+                      Orientation="Horizontal">
+            <Button Width="128"
+                    Height="36"
+                    Command="{Binding SaveExecutionSettingsCommand}"
+                    Content="설정 저장"
+                    FontWeight="SemiBold" />
+          </StackPanel>
         </Grid>
       </TabItem>
 

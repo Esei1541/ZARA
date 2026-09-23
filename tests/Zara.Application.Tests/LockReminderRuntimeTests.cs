@@ -7,6 +7,80 @@ namespace Zara.Application.Tests;
 public sealed class LockReminderRuntimeTests
 {
     private static readonly int[] TenMinuteReminder = [10];
+
+    [TestMethod]
+    [DataRow(30, 18, 39)]
+    [DataRow(5, 19, 4)]
+    public void Wednesday1910RequestsAndDiagnosesTheExpectedReminder(int minutes, int hour, int minute)
+    {
+        var clock = new ManualClock(new DateTimeOffset(2026, 9, 23, hour, minute, 59, TimeSpan.Zero));
+        var audio = new RecordingAudio();
+        var events = new List<string>();
+        var runtime = new LockReminderRuntime(clock, audio, new LockReminderDiagnostics(events.Add));
+        var policy = new UsagePolicySettings(
+            WeeklyUsageRestrictionSchedule.Default.WithRestriction(DayOfWeek.Wednesday,
+                new DailyUsageRestriction(true, new TimeOnly(19, 10), new TimeOnly(23, 0))),
+            EmergencyUnlockSettings.Default, []);
+
+        runtime.Observe(Snapshot(policy, clock), LockReminderSettings.Default);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        runtime.Observe(Snapshot(policy, clock), LockReminderSettings.Default);
+        Assert.HasCount(1, audio.Requests);
+        Assert.AreEqual(minutes, audio.Requests[0]);
+        Assert.IsTrue(audio.Callback!());
+        Assert.IsTrue(events.Any(entry => entry.Contains($"due minutes={minutes}", StringComparison.Ordinal)));
+        Assert.IsTrue(events.Any(entry => entry.Contains($"play-request minutes={minutes}", StringComparison.Ordinal)));
+        clock.Advance(TimeSpan.FromSeconds(1));
+        runtime.Observe(Snapshot(policy, clock), LockReminderSettings.Default);
+        Assert.HasCount(1, audio.Requests);
+    }
+
+    [TestMethod]
+    public void SixMinutesUntilLockPlaysFiveMinuteReminderAfterOneMinute()
+    {
+        var clock = new ManualClock(new DateTimeOffset(2026, 9, 23, 19, 4, 0, TimeSpan.Zero));
+        var audio = new RecordingAudio();
+        var runtime = new LockReminderRuntime(clock, audio);
+        var policy = new UsagePolicySettings(
+            WeeklyUsageRestrictionSchedule.Default.WithRestriction(DayOfWeek.Wednesday,
+                new DailyUsageRestriction(true, new TimeOnly(19, 10), new TimeOnly(23, 0))),
+            EmergencyUnlockSettings.Default, []);
+        runtime.Observe(Snapshot(policy, clock), LockReminderSettings.Default);
+        for (int second = 0; second < 60; second++)
+        {
+            clock.Advance(TimeSpan.FromSeconds(1));
+            runtime.Observe(Snapshot(policy, clock), LockReminderSettings.Default);
+        }
+        Assert.HasCount(1, audio.Requests);
+        Assert.AreEqual(5, audio.Requests[0]);
+        Assert.IsTrue(audio.Callback!());
+        Assert.IsFalse(Snapshot(policy, clock).Evaluation.LockRequired);
+    }
+
+    [TestMethod]
+    public void DiagnosticsDistinguishSlowLoadingFromAudioFailure()
+    {
+        var clock = new ManualClock();
+        var audio = new RecordingAudio();
+        var events = new List<string>();
+        var runtime = new LockReminderRuntime(clock, audio, new LockReminderDiagnostics(events.Add));
+        StartTenMinuteReminder(runtime, clock, audio, CreatePolicy());
+        clock.Advance(TimeSpan.FromSeconds(6));
+        Assert.IsFalse(audio.Callback!());
+        Assert.IsTrue(events.Any(entry => entry.Contains("reason=media-load-late", StringComparison.Ordinal)));
+        Assert.IsFalse(events.Any(entry => entry.StartsWith("play-failed", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public void DiagnosticSinkFailureDoesNotPreventAnAnnouncement()
+    {
+        var clock = new ManualClock();
+        var audio = new RecordingAudio();
+        var runtime = new LockReminderRuntime(clock, audio,
+            new LockReminderDiagnostics(_ => throw new IOException("Diagnostic storage unavailable.")));
+        StartTenMinuteReminder(runtime, clock, audio, CreatePolicy());
+        Assert.IsTrue(audio.Callback!());
+    }
     [TestMethod]
     public void ChangingReservationsCancelsAudioThatIsStillLoading()
     {
@@ -173,9 +247,9 @@ public sealed class LockReminderRuntimeTests
         }
     }
 
-    private sealed class ManualClock : TimeProvider
+    private sealed class ManualClock(DateTimeOffset? start = null) : TimeProvider
     {
-        private DateTimeOffset _now = new(2026, 9, 22, 23, 49, 59, TimeSpan.Zero);
+        private DateTimeOffset _now = start ?? new DateTimeOffset(2026, 9, 22, 23, 49, 59, TimeSpan.Zero);
         private long _timestamp;
 
         public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;

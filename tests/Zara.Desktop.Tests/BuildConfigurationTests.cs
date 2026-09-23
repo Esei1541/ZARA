@@ -30,7 +30,7 @@ public sealed class BuildConfigurationTests
 
         using var viewModel = new MainWindowViewModel(
             restartOnExitWhenUnlocked: false,
-            updateRestartSetting: _ => Task.CompletedTask
+            saveExecutionSettings: (_, _) => Task.CompletedTask
 #if DEBUG
             , requestLock: () => Task.CompletedTask,
             requestDevelopmentUnlock: () => Task.CompletedTask
@@ -61,7 +61,7 @@ public sealed class BuildConfigurationTests
                 "Zara.Desktop.LocalBuilds.LocalBuildViewModel",
                 throwOnError: false) is not null;
 
-            Assert.AreEqual(expectsDevelopmentControls ? 2 : 0, shellActions.Children.Count);
+            Assert.AreEqual(expectsDevelopmentControls ? 3 : 1, shellActions.Children.Count);
             Assert.AreEqual(expectsDevelopmentControls ? 3 : 2, lockActions.Children.Count);
             Assert.IsNotNull(overlay.FindName("EmergencyUnlockButton"));
             Assert.AreEqual(expectsLocalBuildUpdates, hasBuildTab);

@@ -225,13 +225,12 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         _mainWindowViewModel = new MainWindowViewModel(
             _usagePolicyRuntime,
             _restartSettings.RestartOnExitWhenUnlocked,
-            UpdateRestartSettingAsync
+            SaveExecutionSettingsAsync
 #if DEBUG
             , RequestLockAsync,
             RequestDevelopmentUnlockAsync
 #endif
-            , lockReminderSettings: CurrentLockReminderSettings,
-            updateLockReminderSetting: UpdateLockReminderSettingAsync
+            , lockReminderSettings: CurrentLockReminderSettings
             );
         SubscribeUsagePolicyNotifications();
 
@@ -612,11 +611,22 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             if (_usagePolicyRuntime is not null)
             {
                 await _usagePolicyRuntime.RefreshAsync().ConfigureAwait(true);
+                if (_lastReminderRefreshError is not null)
+                {
+                    _lockReminderDiagnostics?.Record("policy-refresh-resumed");
+                    _lastReminderRefreshError = null;
+                }
             }
         }
         catch (Exception exception)
         {
             Trace.TraceError("The usage-policy refresh failed: {0}", exception);
+            string error = exception.ToString();
+            if (_lastReminderRefreshError != error)
+            {
+                _lockReminderDiagnostics?.Record($"policy-refresh-failed error={error}");
+                _lastReminderRefreshError = error;
+            }
         }
         finally
         {
@@ -677,20 +687,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             }));
     }
 
-    private async Task UpdateRestartSettingAsync(bool restartOnExitWhenUnlocked)
-    {
-        await _executionSettingsGate.WaitAsync().ConfigureAwait(true);
-        try
-        {
-            await UpdateRestartSettingCoreAsync(restartOnExitWhenUnlocked).ConfigureAwait(true);
-        }
-        finally
-        {
-            _executionSettingsGate.Release();
-        }
-    }
-
-    private async Task UpdateRestartSettingCoreAsync(bool restartOnExitWhenUnlocked)
+    private async Task SaveExecutionSettingsCoreAsync(DesktopRestartSettings updated)
     {
         ThrowIfShuttingDown();
         if (_usagePolicyRuntime is not null &&
@@ -699,18 +696,15 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             throw new UsagePolicySettingsLockedException();
         }
 
-        if (_restartSettings.RestartOnExitWhenUnlocked == restartOnExitWhenUnlocked)
-        {
-            return;
-        }
-
         WindowsDesktopRestartSettingsStore store = _settingsStore ??
             throw new InvalidOperationException("The restart settings store is not initialized.");
         RestartContinuityUseCase continuity = GetRestartContinuity();
         DesktopRestartSettings previous = _restartSettings;
-        DesktopRestartSettings updated = previous with { RestartOnExitWhenUnlocked = restartOnExitWhenUnlocked };
-
-        if (restartOnExitWhenUnlocked)
+        if (previous.RestartOnExitWhenUnlocked == updated.RestartOnExitWhenUnlocked)
+        {
+            await store.SaveAsync(updated).ConfigureAwait(true);
+        }
+        else if (updated.RestartOnExitWhenUnlocked)
         {
             _ = await continuity
                 .PublishRestartWhenAvailableAsync(restartWhenAvailable: true)
@@ -1038,6 +1032,10 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         UnsubscribeUsagePolicyNotifications();
         StopLockReminders();
         _lockReminders = null;
+        _lockReminderDiagnostics?.Record("session-end");
+        _lockReminderLog?.Dispose();
+        _lockReminderLog = null;
+        _lockReminderDiagnostics = null;
         DisposeRecoveryNotifications();
 
         if (_lockRuntime is not null)

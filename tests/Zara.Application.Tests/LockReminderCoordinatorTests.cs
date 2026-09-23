@@ -369,6 +369,47 @@ public sealed class LockReminderCoordinatorTests
             new LockReminderSettings(ThirtyMinutes: false)));
     }
 
+    [TestMethod]
+    public void DiagnosticsDoNotWriteOnEveryStableRefreshOrWhenTargetIsRemoved()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 23, 12, 0, 0, TimeSpan.Zero));
+        var events = new List<string>();
+        var coordinator = new LockReminderCoordinator(clock, new LockReminderDiagnostics(events.Add));
+        UsagePolicySettings policy = CreateSettings(DayOfWeek.Wednesday, new TimeOnly(19, 10), new TimeOnly(23, 0));
+        coordinator.Evaluate(CreateSnapshot(policy, clock), LockReminderSettings.Default);
+        int initialCount = events.Count;
+        for (int second = 1; second <= 3600; second++)
+        {
+            clock.SetUtcNow(new DateTimeOffset(2026, 9, 23, 12, 0, 0, TimeSpan.Zero).AddSeconds(second));
+            coordinator.Evaluate(CreateSnapshot(policy, clock), LockReminderSettings.Default);
+        }
+        Assert.HasCount(initialCount, events);
+
+        UsagePolicySettings noSchedule = new(WeeklyUsageRestrictionSchedule.Default, EmergencyUnlockSettings.Default, []);
+        coordinator.Evaluate(CreateSnapshot(noSchedule, clock), LockReminderSettings.Default);
+        int removedCount = events.Count;
+        clock.SetUtcNow(new DateTimeOffset(2026, 9, 23, 13, 0, 1, TimeSpan.Zero));
+        coordinator.Evaluate(CreateSnapshot(noSchedule, clock), LockReminderSettings.Default);
+        Assert.HasCount(removedCount, events);
+        Assert.IsGreaterThan(initialCount, removedCount);
+    }
+
+    [TestMethod]
+    [DataRow(true, 6, "observation-late")]
+    [DataRow(false, 1, "disabled")]
+    public void DiagnosticsIdentifyWhyACrossedFiveMinuteReminderWasSkipped(bool enabled, int delaySeconds, string reason)
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 23, 19, 4, 59, TimeSpan.Zero));
+        var events = new List<string>();
+        var coordinator = new LockReminderCoordinator(clock, new LockReminderDiagnostics(events.Add));
+        UsagePolicySettings policy = CreateSettings(DayOfWeek.Wednesday, new TimeOnly(19, 10), new TimeOnly(23, 0));
+        var reminders = new LockReminderSettings(FiveMinutes: enabled);
+        coordinator.Evaluate(CreateSnapshot(policy, clock), reminders);
+        clock.SetUtcNow(new DateTimeOffset(2026, 9, 23, 19, 5, delaySeconds, TimeSpan.Zero));
+        Assert.IsNull(coordinator.Evaluate(CreateSnapshot(policy, clock), reminders));
+        Assert.IsTrue(events.Any(entry => entry.Contains($"skipped reason={reason} minutes=5", StringComparison.Ordinal)));
+    }
+
     private static void AssertReminderAt(
         LockReminderCoordinator coordinator,
         ManualTimeProvider timeProvider,

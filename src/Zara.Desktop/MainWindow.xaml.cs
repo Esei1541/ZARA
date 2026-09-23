@@ -113,7 +113,11 @@ public partial class MainWindow : Window
 
         foreach (object removedItem in e.RemovedItems)
         {
-            if (ReferenceEquals(removedItem, WeeklyScheduleTab))
+            if (ReferenceEquals(removedItem, BasicSettingsTab))
+            {
+                _viewModel.ResetExecutionSettingsEdits();
+            }
+            else if (ReferenceEquals(removedItem, WeeklyScheduleTab))
             {
                 _viewModel.ResetWeeklyScheduleEdits();
             }

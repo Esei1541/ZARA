@@ -14,7 +14,7 @@ public sealed class MainWindowScheduleBindingTests
     {
         var viewModel = new MainWindowViewModel(
             restartOnExitWhenUnlocked: true,
-            updateRestartSetting: _ => Task.CompletedTask
+            saveExecutionSettings: (_, _) => Task.CompletedTask
 #if DEBUG
             , requestLock: () => Task.CompletedTask,
             requestDevelopmentUnlock: () => Task.CompletedTask
@@ -80,7 +80,12 @@ public sealed class MainWindowScheduleBindingTests
         try
         {
             window.Show();
+            viewModel.RestartOnExitWhenUnlocked = false;
+            viewModel.VoiceReminder30Minutes = false;
             window.MainTabs.SelectedIndex = 1;
+
+            Assert.IsTrue(viewModel.RestartOnExitWhenUnlocked);
+            Assert.IsTrue(viewModel.VoiceReminder30Minutes);
             monday.StartTime.HourText = "7";
 
             window.MainTabs.SelectedIndex = 2;
@@ -118,11 +123,28 @@ public sealed class MainWindowScheduleBindingTests
     }
 
     [STATestMethod]
+    public async Task ClosingTheWindowDiscardsBasicTabEdits()
+    {
+        using var runtime = CreateRuntime(UsagePolicySettings.Default);
+        await runtime.InitializeAsync();
+        var viewModel = CreateViewModel(runtime);
+        var window = CreateWindow(viewModel);
+        window.Show();
+        viewModel.RestartOnExitWhenUnlocked = false;
+        viewModel.VoiceReminder10Minutes = false;
+
+        window.Close();
+
+        Assert.IsTrue(viewModel.RestartOnExitWhenUnlocked);
+        Assert.IsTrue(viewModel.VoiceReminder10Minutes);
+    }
+
+    [STATestMethod]
     public void AllReservationDeleteButtonsRemainEnabledWhenSettingsAreDisabled()
     {
         using var viewModel = new MainWindowViewModel(
             restartOnExitWhenUnlocked: true,
-            updateRestartSetting: _ => Task.CompletedTask
+            saveExecutionSettings: (_, _) => Task.CompletedTask
 #if DEBUG
             , requestLock: () => Task.CompletedTask,
             requestDevelopmentUnlock: () => Task.CompletedTask
@@ -179,7 +201,7 @@ public sealed class MainWindowScheduleBindingTests
         new(
             runtime,
             restartOnExitWhenUnlocked: true,
-            updateRestartSetting: _ => Task.CompletedTask
+            saveExecutionSettings: (_, _) => Task.CompletedTask
 #if DEBUG
             , requestLock: () => Task.CompletedTask,
             requestDevelopmentUnlock: () => Task.CompletedTask
