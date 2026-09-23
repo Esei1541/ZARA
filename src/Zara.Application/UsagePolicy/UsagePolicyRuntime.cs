@@ -153,7 +153,9 @@ public sealed class UsagePolicyRuntime : IDisposable
                 var updated = new UsagePolicySettings(
                     weeklySchedule,
                     emergencyUnlock,
-                    current.Reservations);
+                    current.Reservations,
+                    current.EmergencyUnlockUsage.ChangeSettings(
+                        current.EmergencyUnlock, emergencyUnlock, GetCurrentLocalTime()));
                 await PersistAndApplyAsync(updated, cancellationToken).ConfigureAwait(false);
             },
             cancellationToken);
@@ -177,7 +179,8 @@ public sealed class UsagePolicyRuntime : IDisposable
                 var updated = new UsagePolicySettings(
                     weeklySchedule,
                     current.EmergencyUnlock,
-                    current.Reservations);
+                    current.Reservations,
+                    current.EmergencyUnlockUsage);
                 await PersistAndApplyAsync(updated, cancellationToken).ConfigureAwait(false);
             },
             cancellationToken);
@@ -231,7 +234,9 @@ public sealed class UsagePolicyRuntime : IDisposable
                 var updated = new UsagePolicySettings(
                     current.WeeklySchedule,
                     emergencyUnlock,
-                    current.Reservations);
+                    current.Reservations,
+                    current.EmergencyUnlockUsage.ChangeSettings(
+                        current.EmergencyUnlock, emergencyUnlock, GetCurrentLocalTime()));
                 await PersistAndApplyAsync(updated, cancellationToken).ConfigureAwait(false);
             },
             cancellationToken);
@@ -308,6 +313,8 @@ public sealed class UsagePolicyRuntime : IDisposable
                     throw new InvalidOperationException("An emergency unlock is already active.");
                 }
 
+                ThrowIfWeeklyAllowanceExhausted(current.Settings);
+
                 if (_pendingChallenge is not null)
                 {
                     return new EmergencyUnlockStartResult(false, _pendingChallenge);
@@ -316,11 +323,7 @@ public sealed class UsagePolicyRuntime : IDisposable
                 int sentenceCount = current.Settings.EmergencyUnlock.SentenceCount;
                 if (sentenceCount == 0)
                 {
-                    _emergencyUnlockStartedTimestamp = _timeProvider.GetTimestamp();
-                    await SetSettingsAndApplyAsync(
-                        current.Settings,
-                        forceLockApply: false,
-                        cancellationToken).ConfigureAwait(false);
+                    await GrantEmergencyUnlockAsync(cancellationToken).ConfigureAwait(false);
                     return new EmergencyUnlockStartResult(true, null);
                 }
 
@@ -362,12 +365,7 @@ public sealed class UsagePolicyRuntime : IDisposable
                     return false;
                 }
 
-                _pendingChallenge = null;
-                _emergencyUnlockStartedTimestamp = _timeProvider.GetTimestamp();
-                await SetSettingsAndApplyAsync(
-                    CurrentSnapshot.Settings,
-                    forceLockApply: false,
-                    cancellationToken).ConfigureAwait(false);
+                await GrantEmergencyUnlockAsync(cancellationToken).ConfigureAwait(false);
                 return true;
             },
             cancellationToken);
@@ -386,10 +384,61 @@ public sealed class UsagePolicyRuntime : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    private void ThrowIfWeeklyAllowanceExhausted(UsagePolicySettings settings)
+    {
+        if (settings.EmergencyUnlockUsage.GetRemainingCount(settings.EmergencyUnlock, GetCurrentLocalTime()) == 0)
+        {
+            throw new InvalidOperationException("이번 주 긴급 해제 횟수를 모두 사용했습니다.");
+        }
+    }
+
+    private async Task GrantEmergencyUnlockAsync(CancellationToken cancellationToken)
+    {
+        UsagePolicySettings current = CurrentSnapshot.Settings;
+        DateTime localNow = GetCurrentLocalTime();
+        UsagePolicyEvaluation evaluation = UsagePolicyEvaluator.Evaluate(
+            current, localNow, IsEmergencyUnlockActive(current.EmergencyUnlock));
+        if (!evaluation.IsWithinUsageBan || evaluation.HasActiveEmergencyUnlock)
+        {
+            throw new InvalidOperationException("현재는 긴급 해제를 시작할 수 없습니다.");
+        }
+
+        EmergencyUnlockUsage usage = current.EmergencyUnlockUsage.Consume(current.EmergencyUnlock, localNow);
+        UsagePolicySettings updated = current.WithEmergencyUnlockUsage(usage);
+        if (!Equals(usage, current.EmergencyUnlockUsage))
+        {
+            try
+            {
+                await _store.SaveAsync(updated, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                throw new InvalidOperationException(
+                    "사용 횟수를 저장하지 못해 긴급 해제를 시작하지 못했습니다. 다시 시도하세요.", exception);
+            }
+        }
+
+        // Once saved, this request owns exactly one charge even if applying the unlock fails.
+        _pendingChallenge = null;
+        _emergencyUnlockStartedTimestamp = _timeProvider.GetTimestamp();
+        try
+        {
+            await SetSettingsAndApplyAsync(updated, forceLockApply: false, CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            PublishSnapshotIfChanged(updated);
+            throw new InvalidOperationException(
+                "긴급 해제를 적용하지 못했습니다. 같은 해제 요청의 적용을 다시 시도합니다.", exception);
+        }
+    }
+
     private async Task PersistAndApplyAsync(
         UsagePolicySettings settings,
         CancellationToken cancellationToken)
     {
+        settings = RefreshEmergencyUnlockUsage(settings, GetCurrentLocalTime());
         settings = UsagePolicyEvaluator.RemoveExpiredReservations(settings, GetCurrentLocalTime());
         await _store.SaveAsync(settings, cancellationToken).ConfigureAwait(false);
         try
@@ -433,7 +482,7 @@ public sealed class UsagePolicyRuntime : IDisposable
         }
 
         UsagePolicySettings remainingSettings = UsagePolicyEvaluator.RemoveExpiredReservations(
-            settings,
+            RefreshEmergencyUnlockUsage(settings, localNow),
             localNow);
         if (!ReferenceEquals(settings, remainingSettings))
         {
@@ -448,7 +497,7 @@ public sealed class UsagePolicyRuntime : IDisposable
             {
                 // Retain the loaded settings so a later refresh retries cleanup, including when
                 // the app starts with an expired reservation and its settings cannot be written.
-                Trace.TraceError("Expired reservation cleanup could not be saved: {0}", exception);
+                Trace.TraceError("Usage-policy period cleanup could not be saved: {0}", exception);
             }
         }
 
@@ -472,7 +521,8 @@ public sealed class UsagePolicyRuntime : IDisposable
             UsagePolicyEvaluator.FindNextLockStart(
                 settings,
                 localNow,
-                emergencyUnlockEndLocalTime));
+                emergencyUnlockEndLocalTime),
+            settings.EmergencyUnlockUsage.GetRemainingCount(settings.EmergencyUnlock, localNow));
     }
 
     private void PublishSnapshotIfChanged(
@@ -507,7 +557,14 @@ public sealed class UsagePolicyRuntime : IDisposable
             UsagePolicyEvaluator.FindNextLockStart(
                 settings,
                 localNow,
-                emergencyUnlockEndLocalTime));
+                emergencyUnlockEndLocalTime),
+            settings.EmergencyUnlockUsage.GetRemainingCount(settings.EmergencyUnlock, localNow));
+    }
+
+    private static UsagePolicySettings RefreshEmergencyUnlockUsage(UsagePolicySettings settings, DateTime localNow)
+    {
+        EmergencyUnlockUsage usage = settings.EmergencyUnlockUsage.Refresh(settings.EmergencyUnlock, localNow);
+        return Equals(usage, settings.EmergencyUnlockUsage) ? settings : settings.WithEmergencyUnlockUsage(usage);
     }
 
     private bool IsEmergencyUnlockActive(EmergencyUnlockSettings settings)

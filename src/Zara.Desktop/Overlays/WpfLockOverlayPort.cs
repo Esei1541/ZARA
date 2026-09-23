@@ -24,6 +24,7 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
 #endif
 
     private bool _emergencyUnlockEnabled;
+    private int? _emergencyUnlockRemainingCount;
     private bool _systemShutdownEnabled = true;
     private bool _recoveryActive;
     private bool _topologyCaptureFailed;
@@ -119,6 +120,22 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
         foreach (OverlayWindow window in _windows.Values)
         {
             window.SetEmergencyUnlockEnabled(isEnabled);
+        }
+    }
+
+    internal void SetEmergencyUnlockRemainingCount(int? remainingCount)
+    {
+        ThrowIfDisposed();
+        if (_emergencyUnlockRemainingCount == remainingCount)
+        {
+            return;
+        }
+
+        _emergencyUnlockRemainingCount = remainingCount;
+
+        foreach (OverlayWindow window in _windows.Values)
+        {
+            window.SetEmergencyUnlockRemainingCount(remainingCount);
         }
     }
 
@@ -308,6 +325,7 @@ internal sealed class WpfLockOverlayPort : ILockOverlayPort, IDisposable
             ShowActivated = !_windows.Values.Any(existingWindow => existingWindow.IsVisible),
         };
         window.SetEmergencyUnlockEnabled(_emergencyUnlockEnabled);
+        window.SetEmergencyUnlockRemainingCount(_emergencyUnlockRemainingCount);
         window.SetSystemShutdownEnabled(_systemShutdownEnabled);
         window.SetRecoveryActive(_recoveryActive);
         window.DpiChanged += (_, _) => ScheduleReconcile();

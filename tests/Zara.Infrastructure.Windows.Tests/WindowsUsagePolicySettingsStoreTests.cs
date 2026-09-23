@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Zara.Core.UsagePolicy;
 using Zara.Infrastructure.Windows;
 
@@ -116,6 +117,71 @@ public sealed class WindowsUsagePolicySettingsStoreTests
         Assert.AreEqual(corruptJson, await File.ReadAllTextAsync(quarantinePath));
     }
 
+    [TestMethod]
+    public async Task LegacyDocumentWithoutWeeklyFieldsLoadsDisabledDefaultsAndEmptyUsage()
+    {
+        using var store = new WindowsUsagePolicySettingsStore(_settingsDirectoryPath);
+        await store.SaveAsync(CreateSettings());
+        JsonObject document = await ReadDocumentAsync();
+        JsonObject emergency = document["emergencyUnlock"]!.AsObject();
+        emergency.Remove("weeklyLimitEnabled");
+        emergency.Remove("weeklyResetDay");
+        emergency.Remove("weeklyMaximumCount");
+        document.Remove("emergencyUnlockUsage");
+        await File.WriteAllTextAsync(GetSettingsFilePath(), document.ToJsonString());
+
+        UsagePolicySettings loaded = await store.LoadAsync();
+
+        Assert.IsFalse(loaded.EmergencyUnlock.WeeklyLimitEnabled);
+        Assert.AreEqual(DayOfWeek.Sunday, loaded.EmergencyUnlock.WeeklyResetDay);
+        Assert.AreEqual(3, loaded.EmergencyUnlock.WeeklyMaximumCount);
+        Assert.AreEqual(0, loaded.EmergencyUnlockUsage.UsedCount);
+        Assert.IsNull(loaded.EmergencyUnlockUsage.NextResetLocalTime);
+    }
+
+    [TestMethod]
+    [DataRow("weeklyMaximumCount", 0)]
+    [DataRow("weeklyMaximumCount", 100)]
+    [DataRow("weeklyResetDay", 7)]
+    public async Task InvalidWeeklySettingsUseLastKnownGoodSnapshot(string property, int invalidValue)
+    {
+        UsagePolicySettings expected = CreateSettings();
+        using var store = new WindowsUsagePolicySettingsStore(_settingsDirectoryPath);
+        await store.SaveAsync(expected);
+        JsonObject document = await ReadDocumentAsync();
+        document["emergencyUnlock"]![property] = invalidValue;
+        await File.WriteAllTextAsync(GetSettingsFilePath(), document.ToJsonString());
+
+        AssertSettingsEqual(expected, await store.LoadAsync());
+        Assert.IsFalse(File.Exists(GetSettingsFilePath()));
+        Assert.AreEqual(1, Directory.EnumerateFiles(
+            _settingsDirectoryPath, "usage-policy.corrupt-*.json").Count());
+    }
+
+    [TestMethod]
+    [DataRow(100, "2026-09-25T00:00:00")]
+    [DataRow(1, "2026-09-25T00:01:00")]
+    [DataRow(1, null)]
+    public async Task InvalidUsageUsesLastKnownGoodSnapshot(int usedCount, string? nextReset)
+    {
+        UsagePolicySettings expected = CreateSettings();
+        using var store = new WindowsUsagePolicySettingsStore(_settingsDirectoryPath);
+        await store.SaveAsync(expected);
+        JsonObject document = await ReadDocumentAsync();
+        JsonObject usage = document["emergencyUnlockUsage"]!.AsObject();
+        usage["usedCount"] = usedCount;
+        usage["nextResetLocalTime"] = nextReset;
+        await File.WriteAllTextAsync(GetSettingsFilePath(), document.ToJsonString());
+
+        AssertSettingsEqual(expected, await store.LoadAsync());
+        Assert.IsFalse(File.Exists(GetSettingsFilePath()));
+        Assert.AreEqual(1, Directory.EnumerateFiles(
+            _settingsDirectoryPath, "usage-policy.corrupt-*.json").Count());
+    }
+
+    private async Task<JsonObject> ReadDocumentAsync() =>
+        JsonNode.Parse(await File.ReadAllTextAsync(GetSettingsFilePath()))!.AsObject();
+
     private static UsagePolicySettings CreateSettings()
     {
         WeeklyUsageRestrictionSchedule weeklySchedule = UsagePolicySettings.Default.WeeklySchedule
@@ -133,7 +199,12 @@ public sealed class WindowsUsagePolicySettingsStoreTests
                     releaseTime: new TimeOnly(14, 30)));
         return new UsagePolicySettings(
             weeklySchedule,
-            new EmergencyUnlockSettings(durationMinutes: 17, sentenceCount: 4),
+            new EmergencyUnlockSettings(
+                durationMinutes: 17,
+                sentenceCount: 4,
+                weeklyLimitEnabled: true,
+                weeklyResetDay: DayOfWeek.Friday,
+                weeklyMaximumCount: 5),
             [
                 new OutOfHoursReservation(
                     Guid.Parse("21DFAFA2-3FD3-4678-8B5C-2E5A13C57F49"),
@@ -141,13 +212,16 @@ public sealed class WindowsUsagePolicySettingsStoreTests
                     new TimeOnly(9, 0),
                     new TimeOnly(10, 30),
                     "병원 예약"),
-            ]);
+            ],
+            new EmergencyUnlockUsage(usedCount: 2,
+                nextResetLocalTime: new DateTime(2026, 9, 25)));
     }
 
     private static void AssertSettingsEqual(UsagePolicySettings expected, UsagePolicySettings actual)
     {
         Assert.AreEqual(expected.WeeklySchedule, actual.WeeklySchedule);
         Assert.AreEqual(expected.EmergencyUnlock, actual.EmergencyUnlock);
+        Assert.AreEqual(expected.EmergencyUnlockUsage, actual.EmergencyUnlockUsage);
         CollectionAssert.AreEqual(expected.Reservations, actual.Reservations);
     }
 

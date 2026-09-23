@@ -12,4 +12,5 @@ public sealed record UsagePolicyRuntimeSnapshot(
     DateTime EvaluatedLocalTime,
     bool HasPendingEmergencyChallenge,
     DateTime? EmergencyUnlockEndLocalTime,
-    DateTime? NextLockStartLocalTime);
+    DateTime? NextLockStartLocalTime,
+    int? EmergencyUnlockRemainingCount = null);

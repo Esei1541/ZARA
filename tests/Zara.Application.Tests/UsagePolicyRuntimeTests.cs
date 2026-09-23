@@ -940,6 +940,227 @@ public sealed class UsagePolicyRuntimeTests
         Assert.IsTrue(lockPort.AppliedRequirements.Last());
     }
 
+    [TestMethod]
+    public async Task LastWeeklyUnlockRunsUntilExpiryAndCannotBeReusedAfterRestart()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(CreateWeeklyLimitedSettings(maximum: 1));
+        using (var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock))
+        {
+            await runtime.InitializeAsync();
+            Assert.IsTrue((await runtime.StartEmergencyUnlockAsync()).StartedImmediately);
+            Assert.AreEqual(0, runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+            Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
+            clock.AdvanceMonotonic(TimeSpan.FromMinutes(9));
+            await runtime.RefreshAsync();
+            Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
+            clock.AdvanceMonotonic(TimeSpan.FromMinutes(1));
+            await runtime.RefreshAsync();
+            Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => runtime.StartEmergencyUnlockAsync());
+        }
+
+        using var restarted = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await restarted.InitializeAsync();
+        Assert.AreEqual(0, restarted.CurrentSnapshot.EmergencyUnlockRemainingCount);
+        Assert.IsTrue(restarted.CurrentSnapshot.Evaluation.LockRequired);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => restarted.StartEmergencyUnlockAsync());
+        Assert.AreEqual(1, store.Settings.EmergencyUnlockUsage.UsedCount);
+    }
+
+    [TestMethod]
+    public async Task PromptsAndWrongAnswersDoNotConsumeButExactSubmissionConsumesOnce()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(CreateWeeklyLimitedSettings(sentences: 1));
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        EmergencyUnlockStartResult started = await runtime.StartEmergencyUnlockAsync();
+        Assert.AreEqual(started.Challenge, (await runtime.StartEmergencyUnlockAsync()).Challenge);
+        Assert.IsFalse(await runtime.CompleteEmergencyUnlockAsync("틀린 문장"));
+        Assert.AreEqual(0, store.Settings.EmergencyUnlockUsage.UsedCount);
+        Assert.AreEqual(3, runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+        Assert.IsTrue(await runtime.CompleteEmergencyUnlockAsync("기본 문장입니다."));
+        Assert.AreEqual(1, store.Settings.EmergencyUnlockUsage.UsedCount);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => runtime.CompleteEmergencyUnlockAsync("기본 문장입니다."));
+        Assert.AreEqual(1, store.Settings.EmergencyUnlockUsage.UsedCount);
+    }
+
+    [TestMethod]
+    public async Task SubmissionAfterResetChargesTheNewPeriod()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 15, 23, 59, 59, TimeSpan.Zero));
+        UsagePolicySettings settings = CreateWeeklyLimitedSettings(sentences: 1)
+            .WithWeeklySchedule(CreateSchedule(DayOfWeek.Saturday, new TimeOnly(21, 0), new TimeOnly(7, 0)))
+            .WithEmergencyUnlockUsage(new EmergencyUnlockUsage(2, new DateTime(2026, 8, 16)));
+        var store = new RecordingStore(settings);
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        await runtime.StartEmergencyUnlockAsync();
+        clock.SetUtcNow(new DateTimeOffset(2026, 8, 16, 0, 0, 0, TimeSpan.Zero));
+        Assert.IsTrue(await runtime.CompleteEmergencyUnlockAsync("기본 문장입니다."));
+        Assert.AreEqual(2, runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+        Assert.AreEqual(new DateTime(2026, 8, 23), store.Settings.EmergencyUnlockUsage.NextResetLocalTime);
+    }
+
+    [TestMethod]
+    public async Task SubmissionAfterRestrictionEndsDoesNotConsume()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(CreateWeeklyLimitedSettings(sentences: 1));
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        await runtime.StartEmergencyUnlockAsync();
+        clock.SetUtcNow(new DateTimeOffset(2026, 8, 11, 7, 0, 0, TimeSpan.Zero));
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => runtime.CompleteEmergencyUnlockAsync("기본 문장입니다."));
+        Assert.AreEqual(0, store.Settings.EmergencyUnlockUsage.UsedCount);
+    }
+
+    [TestMethod]
+    [DataRow(0)]
+    [DataRow(1)]
+    public async Task FailedConsumptionSaveKeepsLockAndAllowsRetryWithoutLosingPrompts(int sentences)
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(CreateWeeklyLimitedSettings(sentences: sentences));
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        if (sentences > 0)
+        {
+            await runtime.StartEmergencyUnlockAsync();
+        }
+
+        store.SaveException = new IOException("Disk unavailable.");
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+        {
+            if (sentences == 0)
+            {
+                await runtime.StartEmergencyUnlockAsync();
+            }
+            else
+            {
+                await runtime.CompleteEmergencyUnlockAsync("기본 문장입니다.");
+            }
+        });
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        Assert.AreEqual(3, runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+        Assert.AreEqual(0, store.Settings.EmergencyUnlockUsage.UsedCount);
+        store.SaveException = null;
+        if (sentences == 0)
+        {
+            await runtime.StartEmergencyUnlockAsync();
+        }
+        else
+        {
+            Assert.IsTrue(await runtime.CompleteEmergencyUnlockAsync("기본 문장입니다."));
+        }
+
+        Assert.AreEqual(1, store.Settings.EmergencyUnlockUsage.UsedCount);
+    }
+
+    [TestMethod]
+    public async Task FailedUnlockApplicationRetainsChargeAndRefreshRetriesWithoutAnotherSave()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(CreateWeeklyLimitedSettings());
+        var locks = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, locks, new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        locks.FailWhenUnlocking = true;
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => runtime.StartEmergencyUnlockAsync());
+        Assert.AreEqual(1, store.Settings.EmergencyUnlockUsage.UsedCount);
+        Assert.AreEqual(2, runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+        int saved = store.SaveCount;
+        locks.FailWhenUnlocking = false;
+        await runtime.RefreshAsync();
+        Assert.IsFalse(locks.AppliedRequirements.Last());
+        Assert.AreEqual(saved, store.SaveCount);
+        Assert.AreEqual(1, store.Settings.EmergencyUnlockUsage.UsedCount);
+    }
+
+    [TestMethod]
+    public async Task RepeatedRefreshOnlySavesAtResetAndRestoresExhaustedAllowance()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 15, 23, 59, 59, TimeSpan.Zero));
+        var store = new RecordingStore(CreateWeeklyLimitedSettings()
+            .WithEmergencyUnlockUsage(new EmergencyUnlockUsage(3, new DateTime(2026, 8, 16))));
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        for (int index = 0; index < 60; index++)
+        {
+            await runtime.RefreshAsync();
+        }
+
+        Assert.AreEqual(0, store.SaveCount);
+        Assert.AreEqual(0, runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+        clock.SetUtcNow(new DateTimeOffset(2026, 8, 16, 0, 0, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+        await runtime.RefreshAsync();
+        Assert.AreEqual(1, store.SaveCount);
+        Assert.AreEqual(3, runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+    }
+
+    [TestMethod]
+    public async Task WeeklyUsageSurvivesScheduleReservationAndEmergencySettingEdits()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 12, 0, 0, TimeSpan.Zero));
+        var usage = new EmergencyUnlockUsage(2, new DateTime(2026, 8, 16));
+        var store = new RecordingStore(CreateWeeklyLimitedSettings().WithEmergencyUnlockUsage(usage));
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        await runtime.UpdateWeeklyScheduleAsync(WeeklyUsageRestrictionSchedule.Default);
+        var reservation = new OutOfHoursReservation(Guid.NewGuid(), new DateOnly(2026, 8, 12),
+            new TimeOnly(12, 0), new TimeOnly(13, 0), "예약");
+        await runtime.AddReservationAsync(reservation);
+        await runtime.RemoveReservationAsync(reservation.Id);
+        await runtime.UpdateEmergencyUnlockSettingsAsync(new EmergencyUnlockSettings(15, 2, true, DayOfWeek.Sunday, 1));
+        Assert.AreEqual(usage, store.Settings.EmergencyUnlockUsage);
+        Assert.AreEqual(0, runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+        await runtime.UpdateEmergencyUnlockSettingsAsync(new EmergencyUnlockSettings(15, 2, false));
+        Assert.IsNull(runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+        await runtime.UpdateSettingsAsync(WeeklyUsageRestrictionSchedule.Default,
+            new EmergencyUnlockSettings(15, 2, true, DayOfWeek.Sunday, 5));
+        Assert.AreEqual(usage, store.Settings.EmergencyUnlockUsage);
+        Assert.AreEqual(3, runtime.CurrentSnapshot.EmergencyUnlockRemainingCount);
+    }
+
+    [TestMethod]
+    public async Task DisabledLimitDoesNotChargeAndCannotBeChangedDuringRestriction()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero));
+        var usage = new EmergencyUnlockUsage(2, new DateTime(2026, 8, 16));
+        var store = new RecordingStore(CreateWeeklyLimitedSettings()
+            .WithEmergencyUnlock(new EmergencyUnlockSettings(10, 0))
+            .WithEmergencyUnlockUsage(usage));
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        await runtime.StartEmergencyUnlockAsync();
+        Assert.AreEqual(usage, store.Settings.EmergencyUnlockUsage);
+        Assert.AreEqual(0, store.SaveCount);
+        await Assert.ThrowsExactlyAsync<UsagePolicySettingsLockedException>(() =>
+            runtime.UpdateEmergencyUnlockSettingsAsync(new EmergencyUnlockSettings(10, 0, true)));
+    }
+
+    [TestMethod]
+    public async Task ConcurrentRequestsCannotConsumeTheSameRemainingUnlockTwice()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 22, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(CreateWeeklyLimitedSettings(maximum: 1));
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        Task<EmergencyUnlockStartResult> first = runtime.StartEmergencyUnlockAsync();
+        Task<EmergencyUnlockStartResult> second = runtime.StartEmergencyUnlockAsync();
+        Assert.IsTrue((await first).StartedImmediately);
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => second);
+        Assert.AreEqual(1, store.Settings.EmergencyUnlockUsage.UsedCount);
+    }
+
+    private static UsagePolicySettings CreateWeeklyLimitedSettings(int sentences = 0, int maximum = 3) =>
+        CreateSettings(DayOfWeek.Monday, new TimeOnly(21, 0), new TimeOnly(7, 0), sentences)
+            .WithEmergencyUnlock(new EmergencyUnlockSettings(10, sentences, true, DayOfWeek.Sunday, maximum));
+
     private static UsagePolicyRuntime CreateRuntime(
         RecordingStore store,
         RecordingLockPort lockPort,

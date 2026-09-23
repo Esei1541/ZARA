@@ -211,6 +211,8 @@ public sealed class WindowsUsagePolicySettingsStore : IUsagePolicySettingsStore,
 
         public EmergencyUnlockSettings? EmergencyUnlock { get; init; }
 
+        public EmergencyUnlockUsage? EmergencyUnlockUsage { get; init; }
+
         public List<OutOfHoursReservation>? Reservations { get; init; }
 
         public static PersistedUsagePolicySettings FromSettings(UsagePolicySettings settings)
@@ -220,6 +222,7 @@ public sealed class WindowsUsagePolicySettingsStore : IUsagePolicySettingsStore,
             {
                 WeeklySchedule = settings.WeeklySchedule,
                 EmergencyUnlock = settings.EmergencyUnlock,
+                EmergencyUnlockUsage = settings.EmergencyUnlockUsage,
                 Reservations = settings.Reservations.ToList(),
             };
         }
@@ -231,7 +234,8 @@ public sealed class WindowsUsagePolicySettingsStore : IUsagePolicySettingsStore,
                 EmergencyUnlock ?? throw new JsonException(
                     "The usage-policy document did not contain emergency-unlock settings."),
                 Reservations ?? throw new JsonException(
-                    "The usage-policy document did not contain reservations."));
+                    "The usage-policy document did not contain reservations."),
+                EmergencyUnlockUsage);
     }
 
     private static string GetDefaultSettingsDirectoryPath()

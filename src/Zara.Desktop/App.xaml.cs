@@ -42,6 +42,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private DispatcherTimer? _usagePolicyRefreshTimer;
     private MainWindowViewModel? _mainWindowViewModel;
     private EmergencyUnlockWindow? _emergencyUnlockWindow;
+    private bool _emergencyUnlockRequestInProgress;
     private DesktopRestartSettings _restartSettings = DesktopRestartSettings.Default;
     private bool _lockConditionRequired;
     private bool _exitRequestInProgress;
@@ -433,6 +434,30 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private async Task RequestEmergencyUnlockAsync()
     {
         ThrowIfShuttingDown();
+        if (_emergencyUnlockRequestInProgress)
+        {
+            return;
+        }
+
+        _emergencyUnlockRequestInProgress = true;
+        try
+        {
+            UpdateEmergencyUnlockAvailability(GetUsagePolicyRuntime().CurrentSnapshot);
+            await RequestEmergencyUnlockCoreAsync().ConfigureAwait(true);
+        }
+        finally
+        {
+            _emergencyUnlockRequestInProgress = false;
+            if (!IsShuttingDown && _usagePolicyRuntime is { } runtime)
+            {
+                UpdateEmergencyUnlockAvailability(runtime.CurrentSnapshot);
+            }
+        }
+    }
+
+    private async Task RequestEmergencyUnlockCoreAsync()
+    {
+        ThrowIfShuttingDown();
         if (_emergencyUnlockWindow is { IsVisible: true } openWindow)
         {
             openWindow.Activate();
@@ -520,7 +545,10 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             DispatcherPriority.Background,
             new Action(() =>
             {
-                UpdateEmergencyUnlockAvailability(snapshot);
+                if (_usagePolicyRuntime is { } runtime)
+                {
+                    UpdateEmergencyUnlockAvailability(runtime.CurrentSnapshot);
+                }
                 UpdateLockReminders();
             }));
     }
@@ -533,7 +561,11 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         }
 
         bool canRequestEmergencyUnlock = snapshot.Evaluation.IsWithinUsageBan &&
-            snapshot.Evaluation.LockRequired;
+            snapshot.Evaluation.LockRequired &&
+            snapshot.EmergencyUnlockRemainingCount is not 0 &&
+            !_emergencyUnlockRequestInProgress &&
+            _emergencyUnlockWindow is not { IsVisible: true };
+        _overlayPort?.SetEmergencyUnlockRemainingCount(snapshot.EmergencyUnlockRemainingCount);
         _overlayPort?.SetEmergencyUnlockEnabled(canRequestEmergencyUnlock);
     }
 

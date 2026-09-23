@@ -19,6 +19,21 @@ public sealed record EmergencyUnlockSettings
     /// <summary>Gets the largest allowed prompt count.</summary>
     public const int MaximumSentenceCount = 99;
 
+    /// <summary>Gets the smallest weekly allowance.</summary>
+    public const int MinimumWeeklyMaximumCount = 1;
+
+    /// <summary>Gets the largest weekly allowance.</summary>
+    public const int MaximumWeeklyMaximumCount = 99;
+
+    /// <summary>Gets whether the weekly allowance is enforced.</summary>
+    public bool WeeklyLimitEnabled { get; }
+
+    /// <summary>Gets the local weekday on which the allowance resets at midnight.</summary>
+    public DayOfWeek WeeklyResetDay { get; }
+
+    /// <summary>Gets the maximum unlocks allowed in one period.</summary>
+    public int WeeklyMaximumCount { get; }
+
     /// <summary>Gets the requested unlock duration in whole minutes.</summary>
     public int DurationMinutes { get; }
 
@@ -36,7 +51,12 @@ public sealed record EmergencyUnlockSettings
     /// <exception cref="ArgumentOutOfRangeException">
     /// A value falls outside its supported inclusive range.
     /// </exception>
-    public EmergencyUnlockSettings(int durationMinutes, int sentenceCount)
+    public EmergencyUnlockSettings(
+        int durationMinutes,
+        int sentenceCount,
+        bool weeklyLimitEnabled = false,
+        DayOfWeek weeklyResetDay = DayOfWeek.Sunday,
+        int weeklyMaximumCount = 3)
     {
         if (durationMinutes is < MinimumDurationMinutes or > MaximumDurationMinutes)
         {
@@ -56,6 +76,19 @@ public sealed record EmergencyUnlockSettings
                 $"{MaximumSentenceCount}.");
         }
 
+        if (!Enum.IsDefined(weeklyResetDay))
+        {
+            throw new ArgumentOutOfRangeException(nameof(weeklyResetDay));
+        }
+
+        if (weeklyMaximumCount is < MinimumWeeklyMaximumCount or > MaximumWeeklyMaximumCount)
+        {
+            throw new ArgumentOutOfRangeException(nameof(weeklyMaximumCount));
+        }
+
+        WeeklyLimitEnabled = weeklyLimitEnabled;
+        WeeklyResetDay = weeklyResetDay;
+        WeeklyMaximumCount = weeklyMaximumCount;
         DurationMinutes = durationMinutes;
         SentenceCount = sentenceCount;
     }
