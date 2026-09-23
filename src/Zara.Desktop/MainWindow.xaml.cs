@@ -9,21 +9,22 @@ using Zara.Desktop.LocalBuilds;
 using Zara.Application.UsagePolicy;
 using Zara.Core.UsagePolicy;
 using Zara.Desktop.ViewModels;
+using Zara.Desktop.Updates;
 #if DEBUG
 using Button = System.Windows.Controls.Button;
 #endif
 
 namespace Zara.Desktop;
 
-#if LOCAL_BUILD_UPDATES
 [System.Diagnostics.CodeAnalysis.SuppressMessage(
     "Design",
     "CA1001:Types that own disposable fields should be disposable",
-    Justification = "The WPF window owns the build view model and disposes it in OnClosed.")]
-#endif
+    Justification = "The window disposes its local build view model in OnClosed; App owns the shared release update view model.")]
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
+    private readonly ReleaseUpdateViewModel? _releaseUpdateViewModel;
+    private readonly TabItem? _releaseUpdateTab;
 #if LOCAL_BUILD_UPDATES
     private readonly LocalBuildViewModel? _localBuildViewModel;
     private readonly TabItem? _localBuildTab;
@@ -34,6 +35,7 @@ public partial class MainWindow : Window
 #if LOCAL_BUILD_UPDATES
         , ILocalBuildUpdates? localBuildUpdates = null
 #endif
+        , ReleaseUpdateViewModel? releaseUpdates = null
         )
     {
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
@@ -54,6 +56,16 @@ public partial class MainWindow : Window
             MainTabs.Items.Add(_localBuildTab);
         }
 #endif
+        _releaseUpdateViewModel = releaseUpdates;
+        if (releaseUpdates is not null)
+        {
+            _releaseUpdateTab = new TabItem
+            {
+                Header = "업데이트",
+                Content = new ReleaseUpdateView(releaseUpdates),
+            };
+            MainTabs.Items.Add(_releaseUpdateTab);
+        }
 #if DEBUG
         ShellActions.Children.Add(new Button
         {
@@ -102,11 +114,7 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-#if LOCAL_BUILD_UPDATES
     private async void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
-#else
-    private void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
-#endif
     {
         if (!ReferenceEquals(e.OriginalSource, MainTabs))
         {
@@ -129,15 +137,28 @@ public partial class MainWindow : Window
             }
         }
 
-#if LOCAL_BUILD_UPDATES
         foreach (object addedItem in e.AddedItems)
         {
+            if (ReferenceEquals(addedItem, _releaseUpdateTab) && _releaseUpdateViewModel is not null)
+            {
+                await _releaseUpdateViewModel.RefreshAsync().ConfigureAwait(true);
+            }
+#if LOCAL_BUILD_UPDATES
             if (ReferenceEquals(addedItem, _localBuildTab) && _localBuildViewModel is not null)
             {
                 await _localBuildViewModel.EnterAsync().ConfigureAwait(true);
             }
-        }
 #endif
+        }
+    }
+
+    internal void SelectUpdateTab() => MainTabs.SelectedItem = _releaseUpdateTab;
+
+    internal bool ConfirmReleaseUpdate()
+    {
+        var dialog = new SettingsMessageDialog("업데이트", ReleaseUpdateViewModel.UpdatePrompt, confirmText: "설치");
+        dialog.CancelButton.Content = "나중에";
+        return ShowSettingsDialog(dialog) == true;
     }
 
 #if LOCAL_BUILD_UPDATES

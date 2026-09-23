@@ -123,6 +123,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
                 , _localBuildUpdates ?? throw new InvalidOperationException(
                     "The local build update use case is not initialized.")
 #endif
+                , releaseUpdates: _releaseUpdateViewModel
                 );
             MainWindow = window;
         }
@@ -233,6 +234,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             , lockReminderSettings: CurrentLockReminderSettings
             );
         SubscribeUsagePolicyNotifications();
+        InitializeReleaseUpdates();
 
         await _supervisionConnection
             .ReportHealthyAsync(acknowledgedLease.Revision)
@@ -245,6 +247,8 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         {
             ShowMainWindow();
         }
+
+        _ = _releaseUpdateViewModel!.CheckOnStartupAsync();
     }
 
     private static string? ParseServiceLaunchToken(IReadOnlyList<string> arguments)
@@ -550,6 +554,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         {
             UpdateEmergencyUnlockAvailability(snapshot);
             UpdateLockReminders();
+            TryShowPendingUpdate();
             return;
         }
 
@@ -562,6 +567,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
                     UpdateEmergencyUnlockAvailability(runtime.CurrentSnapshot);
                 }
                 UpdateLockReminders();
+                TryShowPendingUpdate();
             }));
     }
 
@@ -1028,6 +1034,8 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         }
 
         DisposeStartupResources();
+        _releaseUpdateViewModel?.Dispose();
+        _releaseUpdateSource?.Dispose();
         CancelSystemShutdownWatchdog();
         UnsubscribeUsagePolicyNotifications();
         StopLockReminders();

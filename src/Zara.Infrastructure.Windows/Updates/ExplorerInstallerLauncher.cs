@@ -1,7 +1,6 @@
-#if LOCAL_BUILD_UPDATES
 using System.Runtime.InteropServices;
 
-namespace Zara.Infrastructure.Windows.LocalBuilds;
+namespace Zara.Infrastructure.Windows.Updates;
 
 /// <summary>Uses the desktop Explorer's automation object, never an in-process ShellExecute fallback.</summary>
 internal static class ExplorerInstallerLauncher
@@ -52,4 +51,3 @@ internal static class ExplorerInstallerLauncher
         }
     }
 }
-#endif
