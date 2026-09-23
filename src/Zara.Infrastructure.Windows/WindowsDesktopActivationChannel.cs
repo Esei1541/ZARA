@@ -210,6 +210,10 @@ public sealed partial class WindowsDesktopActivationChannel : IDisposable
         }
     }
 
+    /// <summary>Requests activation without claiming the primary endpoint.</summary>
+    public static Task<bool> TryActivateExistingAsync(CancellationToken cancellationToken = default) =>
+        TryActivateExistingAsync(ReadCurrentIdentity(), cancellationToken);
+
     private static async Task<bool> TryActivateExistingAsync(
         ActivationIdentity identity,
         CancellationToken cancellationToken)

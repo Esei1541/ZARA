@@ -1,0 +1,20 @@
+<Window x:Class="Zara.Desktop.StartupWindow" x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ZARA 시작" Width="470" SizeToContent="Height" ResizeMode="NoResize"
+        Background="#FFF7F8FA" WindowStartupLocation="CenterScreen" Icon="Assets/ZaraIcon.png">
+    <StackPanel Margin="28">
+        <TextBlock Text="ZARA" FontSize="24" FontWeight="SemiBold" />
+        <TextBlock x:Name="MessageText" Margin="0,16,0,16" TextWrapping="Wrap"
+                   Text="ZARA 서비스를 확인하고 있습니다..." />
+        <Expander x:Name="DetailsPanel" Header="상세 정보" Visibility="Collapsed" Margin="0,0,0,16">
+            <TextBox x:Name="DetailsText" IsReadOnly="True" TextWrapping="Wrap" BorderThickness="0"
+                     Background="Transparent" Margin="0,8,0,0" />
+        </Expander>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="ActionButton" MinWidth="100" Padding="12,7" Margin="0,0,8,0"
+                    Visibility="Collapsed" Click="ActionButton_Click" />
+            <Button Content="닫기" MinWidth="80" Padding="12,7" Click="CloseButton_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

@@ -154,8 +154,7 @@ public sealed class WindowsSupervisionConnection : IRestartContinuityPort, ILock
                     response.AcknowledgedRevision != initialLease.Revision) ||
                 response.ErrorCode is not null)
             {
-                throw new InvalidOperationException(
-                    $"The ZARA Service rejected desktop registration ({response.ErrorCode ?? "UNKNOWN"}).");
+                throw new SupervisionRegistrationException(response.ErrorCode ?? "UNKNOWN");
             }
 
             return new WindowsSupervisionConnection(pipe, reader, writer, response);
