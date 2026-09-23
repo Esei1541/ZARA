@@ -34,4 +34,9 @@
     </Content>
   </ItemGroup>
 
+  <ItemGroup Condition="'$(Configuration)' == 'Release'">
+    <Compile Remove="LocalBuilds\**\*.cs" />
+    <Page Remove="LocalBuilds\**\*.xaml" />
+  </ItemGroup>
+
 </Project>

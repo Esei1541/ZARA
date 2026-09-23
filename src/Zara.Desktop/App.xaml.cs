@@ -5,6 +5,9 @@ using System.Windows;
 using System.Windows.Forms;
 using System.Windows.Threading;
 using Microsoft.Win32;
+#if LOCAL_BUILD_UPDATES
+using Zara.Application.LocalBuilds;
+#endif
 using Zara.Application.Continuity;
 using Zara.Application.Locking;
 using Zara.Application.SystemPower;
@@ -13,6 +16,9 @@ using Zara.Core.Continuity;
 using Zara.Core.Runtime;
 using Zara.Desktop.Overlays;
 using Zara.Desktop.ViewModels;
+#if LOCAL_BUILD_UPDATES
+using Zara.Infrastructure.Windows.LocalBuilds;
+#endif
 using Zara.Infrastructure.Windows;
 using Zara.Infrastructure.Windows.Continuity;
 using Zara.Infrastructure.Windows.UsagePolicy;
@@ -41,6 +47,9 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private UsagePolicyRuntime? _usagePolicyRuntime;
     private DispatcherTimer? _usagePolicyRefreshTimer;
     private MainWindowViewModel? _mainWindowViewModel;
+#if LOCAL_BUILD_UPDATES
+    private ILocalBuildUpdates? _localBuildUpdates;
+#endif
     private EmergencyUnlockWindow? _emergencyUnlockWindow;
     private bool _emergencyUnlockRequestInProgress;
     private DesktopRestartSettings _restartSettings = DesktopRestartSettings.Default;
@@ -102,7 +111,13 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         {
             MainWindowViewModel viewModel = _mainWindowViewModel ??
                 throw new InvalidOperationException("The main window view model is not initialized.");
-            window = new MainWindow(viewModel);
+            window = new MainWindow(
+                viewModel
+#if LOCAL_BUILD_UPDATES
+                , _localBuildUpdates ?? throw new InvalidOperationException(
+                    "The local build update use case is not initialized.")
+#endif
+                );
             MainWindow = window;
         }
 
@@ -211,6 +226,11 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         UpdateEmergencyUnlockAvailability(_usagePolicyRuntime.CurrentSnapshot);
         acknowledgedLease = _restartContinuity.CurrentAcknowledgedLease ?? acknowledgedLease;
 
+#if LOCAL_BUILD_UPDATES
+        _localBuildUpdates = new LocalBuildUpdateUseCase(
+            new WindowsLocalBuildStore(),
+            new WindowsLocalBuildInstaller());
+#endif
         _mainWindowViewModel = new MainWindowViewModel(
             _usagePolicyRuntime,
             _restartSettings.RestartOnExitWhenUnlocked,

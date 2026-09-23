@@ -1,4 +1,9 @@
 <Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Release" />
+    <BuildType Name="Staging" />
+  </Configurations>
   <Project Path="src/Zara.Core/Zara.Core.csproj" />
   <Project Path="src/Zara.Application/Zara.Application.csproj" />
   <Project Path="src/Zara.Supervision.Contracts/Zara.Supervision.Contracts.csproj" />
