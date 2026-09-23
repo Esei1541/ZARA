@@ -8,5 +8,6 @@ public sealed record LocalBuildInfo(
     string Configuration,
     DateTimeOffset CreatedAt,
     string Branch,
-    string Commit);
+    string Commit,
+    string? CommitSubject = null);
 #endif

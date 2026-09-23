@@ -12,6 +12,41 @@ namespace Zara.Desktop.Tests;
 public sealed class MainWindowScheduleBindingTests
 {
     [STATestMethod]
+    public async Task HeaderAndEmergencyDaySelectorUseSavedAndDraftValuesSeparately()
+    {
+        using var runtime = CreateRuntime(UsagePolicySettings.Default.WithEmergencyUnlock(
+            new EmergencyUnlockSettings(10, 3, true, DayOfWeek.Sunday, 3)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        var window = CreateWindow(viewModel);
+        try
+        {
+            window.Width = window.MinWidth;
+            window.Height = window.MinHeight;
+            window.MainTabs.SelectedIndex = 2;
+            window.Show();
+            window.ResetDayList.SelectedValue = DayOfWeek.Friday;
+            DrainBindings(window);
+            window.UpdateLayout();
+
+            Assert.AreEqual(DayOfWeek.Friday, viewModel.EmergencyWeeklyResetDay);
+            Assert.AreEqual("일요일 초기화", window.EmergencyResetText.Text);
+            Assert.AreEqual("3회", window.EmergencyQuotaText.Text);
+            AssertContained(window.LockCountdownText, window);
+            AssertContained(window.EmergencyResetText, window);
+
+            window.MainTabs.SelectedIndex = 0;
+            window.MainTabs.SelectedIndex = 2;
+            DrainBindings(window);
+            Assert.AreEqual(DayOfWeek.Sunday, window.ResetDayList.SelectedValue);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [STATestMethod]
     public void UsageCheckboxReflectsAndUpdatesTheWeekdayEditor()
     {
         var viewModel = new MainWindowViewModel(
@@ -173,10 +208,11 @@ public sealed class MainWindowScheduleBindingTests
                 grid.UpdateLayout();
                 var row = (DataGridRow)grid.ItemContainerGenerator.ContainerFromItem(reservation);
                 var presenter = FindVisualChild<DataGridCellsPresenter>(row);
-                var cell = (DataGridCell)presenter.ItemContainerGenerator.ContainerFromIndex(5);
+                var cell = (DataGridCell)presenter.ItemContainerGenerator.ContainerFromIndex(4);
                 var deleteButton = FindVisualChild<Button>(cell);
                 Assert.IsTrue(deleteButton.IsEnabled);
-                Assert.AreEqual("삭제", deleteButton.Content);
+                Assert.AreEqual("예약 삭제", System.Windows.Automation.AutomationProperties.GetName(deleteButton));
+                Assert.IsInstanceOfType<TextBlock>(deleteButton.Content);
             }
         }
         finally

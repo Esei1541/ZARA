@@ -13,7 +13,7 @@ namespace Zara.Desktop.Tests;
 public sealed class LockReminderSettingsBindingTests
 {
     private static readonly string[] ReminderSectionText =
-        ["음성 안내", "잠금 시각이 다가오면 음성 안내를 출력합니다."];
+        ["잠금 전 음성 안내", "잠금 시각이 다가오면 음성 안내를 출력합니다."];
     private static readonly (string Content, string Value)[] ExpectedBindings =
     [
         ("30분 전", "VoiceReminder30Minutes"),
@@ -50,7 +50,7 @@ public sealed class LockReminderSettingsBindingTests
 
             CheckBox restartCheckBox = FindVisualDescendants<CheckBox>(window)
                 .Single(checkBox => Equals(checkBox.Content,
-                    "잠금이 해제된 상태에서도 프로그램이 종료되면 자동으로 다시 실행"));
+                    "자동 재실행"));
             Binding restartValue = BindingOperations.GetBinding(
                 restartCheckBox, ToggleButton.IsCheckedProperty)!;
             Binding restartEnabled = BindingOperations.GetBinding(

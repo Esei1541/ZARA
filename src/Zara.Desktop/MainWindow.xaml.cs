@@ -62,6 +62,7 @@ public partial class MainWindow : Window
             Padding = new Thickness(16, 0, 16, 0),
             Command = _viewModel.StartLockDemoCommand,
             Content = "오버레이 시연 시작",
+            Style = (Style)FindResource("Zara.Button"),
             FontWeight = FontWeights.SemiBold,
         });
         ShellActions.Children.Add(new Button
@@ -72,6 +73,7 @@ public partial class MainWindow : Window
             Padding = new Thickness(16, 0, 16, 0),
             Command = _viewModel.DevelopmentUnlockCommand,
             Content = "잠금 해제(개발용)",
+            Style = (Style)FindResource("Zara.Button"),
             FontWeight = FontWeights.SemiBold,
         });
 #endif

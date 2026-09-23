@@ -10,7 +10,8 @@ public sealed class LocalBuildViewModelTests
     [TestMethod]
     public async Task LoadPreservesBackendOrderAndDisablesOnlyTheExactCurrentBuild()
     {
-        LocalBuildInfo current = Build("build-current", "1.0.1", "Staging", minute: 2);
+        LocalBuildInfo current = Build("build-current", "1.0.1", "Staging", minute: 2)
+            with { CommitSubject = "fix: 빌드 제목 표시" };
         var updates = new RecordingUpdates
         {
             Catalog = new LocalBuildCatalog(
@@ -45,11 +46,18 @@ public sealed class LocalBuildViewModelTests
         Assert.IsTrue(viewModel.Builds[0].CanInstall);
         Assert.IsTrue(viewModel.Builds[1].IsCurrent);
         Assert.IsFalse(viewModel.Builds[1].CanInstall);
+        Assert.AreEqual("fix: 빌드 제목 표시", viewModel.Builds[1].CommitSubject);
         Assert.IsFalse(viewModel.Builds[2].IsCurrent);
         Assert.IsTrue(viewModel.Builds[2].CanInstall);
         Assert.AreEqual("확인 불가", viewModel.Builds[3].VersionName);
         Assert.AreEqual("확인 불가", viewModel.Builds[3].CreatedAtText);
         Assert.IsFalse(viewModel.Builds[3].CanInstall);
+        Assert.AreEqual("기록된 커밋 제목이 없습니다.", viewModel.Builds[3].CommitSubject);
+        Assert.AreEqual("1.0.1 · Staging", viewModel.CurrentBuildVersionConfiguration);
+        Assert.AreEqual(current.Commit[..7], viewModel.CurrentBuildShortCommit);
+        Assert.IsFalse(viewModel.HasSelectedBuild);
+        viewModel.SelectedBuild = viewModel.Builds[0];
+        Assert.IsTrue(viewModel.HasSelectedBuild);
     }
 
     [TestMethod]

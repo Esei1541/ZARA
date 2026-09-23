@@ -20,7 +20,9 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
     private IReadOnlyList<LocalBuildItemViewModel> _builds = [];
     private LocalBuildItemViewModel? _selectedBuild;
     private string _buildsDirectory = string.Empty;
-    private string _currentBuildText = "현재 빌드 정보를 아직 불러오지 않았습니다.";
+    private string _currentBuildVersionConfiguration = "현재 빌드 정보를 확인할 수 없습니다.";
+    private string _currentBuildBranch = string.Empty;
+    private string _currentBuildShortCommit = string.Empty;
     private string? _statusMessage;
     private string? _errorMessage;
     private int _operationInProgress;
@@ -70,6 +72,7 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
             _selectedBuild = value;
             OnPropertyChanged();
             OnPropertyChanged(nameof(CanInstallSelected));
+            OnPropertyChanged(nameof(HasSelectedBuild));
             _installSelectedBuildCommand.NotifyCanExecuteChanged();
         }
     }
@@ -84,14 +87,22 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
         }
     }
 
-    public string CurrentBuildText
+    public string CurrentBuildVersionConfiguration
     {
-        get => _currentBuildText;
-        private set
-        {
-            _currentBuildText = value;
-            OnPropertyChanged();
-        }
+        get => _currentBuildVersionConfiguration;
+        private set { _currentBuildVersionConfiguration = value; OnPropertyChanged(); }
+    }
+
+    public string CurrentBuildBranch
+    {
+        get => _currentBuildBranch;
+        private set { _currentBuildBranch = value; OnPropertyChanged(); }
+    }
+
+    public string CurrentBuildShortCommit
+    {
+        get => _currentBuildShortCommit;
+        private set { _currentBuildShortCommit = value; OnPropertyChanged(); }
     }
 
     public string? StatusMessage
@@ -117,6 +128,7 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
     public bool IsBusy => Volatile.Read(ref _operationInProgress) != 0;
     public bool CanInteract => !IsDisposed && !IsBusy;
     public bool CanInstallSelected => CanInstallSelectedBuild();
+    public bool HasSelectedBuild => SelectedBuild is not null;
     public ICommand RefreshCommand => _refreshCommand;
     public ICommand ChangeDirectoryCommand => _changeDirectoryCommand;
     public ICommand InstallSelectedBuildCommand => _installSelectedBuildCommand;
@@ -262,8 +274,15 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
             .ToArray();
         _selectedBuild = null;
         OnPropertyChanged(nameof(SelectedBuild));
+        OnPropertyChanged(nameof(HasSelectedBuild));
         BuildsDirectory = catalog.BuildsDirectory;
-        CurrentBuildText = FormatCurrentBuild(catalog.CurrentBuild);
+        CurrentBuildVersionConfiguration = catalog.CurrentBuild is { } current
+            ? $"{current.VersionName} · {current.Configuration}"
+            : "현재 빌드 정보를 확인할 수 없습니다.";
+        CurrentBuildBranch = catalog.CurrentBuild?.Branch ?? string.Empty;
+        CurrentBuildShortCommit = catalog.CurrentBuild?.Commit is { Length: >= 7 } commit
+            ? commit[..7]
+            : catalog.CurrentBuild?.Commit ?? string.Empty;
         ErrorMessage = null;
         StatusMessage = !string.IsNullOrWhiteSpace(catalog.Message)
             ? catalog.Message
@@ -328,13 +347,6 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
             ? message
             : $"{message} {exception.Message}";
     }
-
-    private static string FormatCurrentBuild(LocalBuildInfo? build) => build is null
-        ? "현재 빌드 정보를 확인할 수 없습니다."
-        : $"현재 빌드: {build.VersionName} / {build.Configuration}\n" +
-          $"빌드: {build.BuildId}\n" +
-          $"브랜치: {build.Branch} / 커밋: {build.Commit}\n" +
-          $"생성: {build.CreatedAt:yyyy-MM-dd HH:mm:ss zzz}";
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null) =>
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));

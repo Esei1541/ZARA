@@ -33,6 +33,29 @@ public sealed class ReservationEditorDialogTests
         Assert.IsTrue(timeInputs.All(DigitsOnlyTextBoxBehavior.GetIsEnabled));
     }
 
+    [STATestMethod]
+    public void ReservationFormUsesTwentyFourHourLabelsAndGuidance()
+    {
+        var dialog = new ReservationEditorDialog();
+        string[] visibleTexts = FindLogicalDescendants<TextBlock>(dialog)
+            .Select(textBlock => textBlock.Text)
+            .ToArray();
+
+        Assert.AreEqual("예약 추가", dialog.Title);
+        CollectionAssert.Contains(visibleTexts, "시작 시각");
+        CollectionAssert.Contains(visibleTexts, "종료 시각");
+        CollectionAssert.Contains(
+            visibleTexts,
+            "시각은 24시간을 기준으로 입력해주세요. (예: 오후 07:30 → 19:30)");
+        Assert.IsFalse(FindLogicalDescendants<ComboBox>(dialog).Any());
+
+        TextBox[] hourInputs = FindLogicalDescendants<TextBox>(dialog)
+            .Where(textBox => AutomationProperties.GetName(textBox) is "시작 시각 시간" or "종료 시각 시간")
+            .ToArray();
+        Assert.HasCount(2, hourInputs);
+        Assert.IsTrue(hourInputs.All(textBox => AutomationProperties.GetHelpText(textBox) == "0부터 23까지 입력"));
+    }
+
     private static IEnumerable<T> FindLogicalDescendants<T>(DependencyObject parent)
         where T : DependencyObject
     {

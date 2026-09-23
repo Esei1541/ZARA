@@ -68,6 +68,25 @@ public sealed class WindowsLocalBuildStoreTests
     }
 
     [TestMethod]
+    public async Task CommitSubjectIsReadWhenPresentAndOlderManifestsRemainInstallable()
+    {
+        LocalBuildManifest titled = await AddBuildAsync("titled", DateTimeOffset.UtcNow);
+        titled.CommitSubject = "fix: 빌드 제목 표시";
+        await WriteManifestAsync(Path.Combine(_builds, "titled", "build.json"), titled);
+        await AddBuildAsync("legacy", DateTimeOffset.UtcNow.AddMinutes(-1));
+        await WriteInstalledIdentityAsync(titled);
+        var store = CreateStore();
+
+        LocalBuildCatalog catalog = await store.LoadAsync();
+
+        Assert.AreEqual("fix: 빌드 제목 표시", catalog.CurrentBuild?.CommitSubject);
+        Assert.AreEqual("fix: 빌드 제목 표시", catalog.Builds.Single(entry => entry.Build.BuildId == "titled").Build.CommitSubject);
+        LocalBuildEntry legacy = catalog.Builds.Single(entry => entry.Build.BuildId == "legacy");
+        Assert.IsNull(legacy.Build.CommitSubject);
+        Assert.IsTrue(legacy.CanInstall);
+    }
+
+    [TestMethod]
     public async Task PendingDirectoriesAreHiddenAndBrokenCompletedEntriesAreDisabled()
     {
         Directory.CreateDirectory(Path.Combine(_builds, "pending"));

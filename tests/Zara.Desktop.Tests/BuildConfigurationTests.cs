@@ -52,7 +52,7 @@ public sealed class BuildConfigurationTests
 
         try
         {
-            var shellActions = (StackPanel)mainWindow.FindName("ShellActions");
+            var shellActions = (Panel)mainWindow.FindName("ShellActions");
             var lockActions = (WrapPanel)overlay.FindName("LockActions");
             bool hasBuildTab = mainWindow.MainTabs.Items
                 .OfType<TabItem>()

@@ -19,10 +19,18 @@ internal sealed class LocalBuildItemViewModel
     public string Configuration => string.IsNullOrWhiteSpace(Entry.Build.Configuration) ? "확인 불가" : Entry.Build.Configuration;
     public string CreatedAtText => Entry.Build.CreatedAt == DateTimeOffset.MinValue ? "확인 불가" : $"{Entry.Build.CreatedAt:yyyy-MM-dd HH:mm:ss}";
     public string Branch => string.IsNullOrWhiteSpace(Entry.Build.Branch) ? "확인 불가" : Entry.Build.Branch;
+    public string BranchDisplay => Branch.Length > 7 &&
+        Branch[6] == '-' && Branch[..6].All(char.IsDigit)
+            ? Branch[7..]
+            : Branch;
     public string Commit => string.IsNullOrWhiteSpace(Entry.Build.Commit) ? "확인 불가" : Entry.Build.Commit;
+    public string CommitSubject => string.IsNullOrWhiteSpace(Entry.Build.CommitSubject)
+        ? "기록된 커밋 제목이 없습니다."
+        : Entry.Build.CommitSubject;
     public string? Problem => Entry.Problem;
     public bool IsCurrent { get; }
-    public string CurrentMarker => IsCurrent ? "현재" : string.Empty;
+    public string StateText => IsCurrent ? "현재 사용 중인 빌드입니다."
+        : CanInstall ? "설치 가능" : Problem ?? "설치할 수 없습니다.";
     public bool CanInstall => Entry.CanInstall && !IsCurrent;
 }
 #endif

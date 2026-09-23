@@ -2,140 +2,128 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:behaviors="clr-namespace:Zara.Desktop.Behaviors"
-        Title="시간 외 사용 예약 추가"
-        Width="520"
+        Title="예약 추가"
+        Width="540"
         MinWidth="480"
         SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        Background="#FFF7F8FA">
-  <Grid Margin="24">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="16" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="16" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="16" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="24" />
-      <RowDefinition Height="Auto" />
-    </Grid.RowDefinitions>
-    <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="92" />
-      <ColumnDefinition Width="*" />
-    </Grid.ColumnDefinitions>
+        Background="#FFF5F6F8">
+  <Window.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Styles/SettingsStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Window.Resources>
 
-    <TextBlock Grid.Row="0"
-               Grid.Column="0"
-               VerticalAlignment="Center"
-               Text="날짜" />
-    <DatePicker Grid.Row="0"
-                Grid.Column="1"
-                Width="180"
-                HorizontalAlignment="Left"
-                AutomationProperties.Name="예약 날짜"
-                SelectedDate="{Binding SelectedDate}" />
+  <Grid TextElement.Foreground="{StaticResource Zara.Brush.Text}"
+        TextElement.FontFamily="{StaticResource Zara.Font.Family}"
+        TextElement.FontSize="14">
+    <Border Style="{StaticResource Zara.Panel}" Margin="20" Padding="24">
+      <StackPanel>
+        <TextBlock Text="예약 추가" Style="{StaticResource Zara.Heading}" FontSize="20" Margin="0,0,0,22" />
 
-    <TextBlock Grid.Row="2"
-               Grid.Column="0"
-               VerticalAlignment="Center"
-               Text="시작 시각" />
-    <StackPanel Grid.Row="2"
-                Grid.Column="1"
-                Orientation="Horizontal">
-      <ComboBox Width="72"
-                AutomationProperties.Name="시작 시각 오전 또는 오후"
-                ItemsSource="{Binding StartTime.Meridiems}"
-                SelectedItem="{Binding StartTime.Meridiem}" />
-      <TextBox Width="52"
-               Margin="8,0,0,0"
-               MaxLength="2"
-               AutomationProperties.HelpText="1부터 12까지 입력"
-               AutomationProperties.Name="시작 시각 시간"
-               behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
-               HorizontalContentAlignment="Right"
-               InputScope="Number"
-               Text="{Binding StartTime.HourText, UpdateSourceTrigger=PropertyChanged}" />
-      <TextBlock Margin="6,0"
-                 VerticalAlignment="Center"
-                 Text=":" />
-      <TextBox Width="52"
-               MaxLength="2"
-               AutomationProperties.HelpText="0부터 59까지 입력"
-               AutomationProperties.Name="시작 시각 분"
-               behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
-               HorizontalContentAlignment="Right"
-               InputScope="Number"
-               Text="{Binding StartTime.MinuteText, UpdateSourceTrigger=PropertyChanged}" />
-      <TextBlock Margin="10,0,0,0"
-                 VerticalAlignment="Center"
-                 Foreground="#FF5C6470"
-                 Text="(1~12시, 0~59분)" />
-    </StackPanel>
+        <TextBlock Text="날짜" FontWeight="SemiBold" Margin="0,0,0,8" />
+        <DatePicker Height="36"
+                    AutomationProperties.Name="예약 날짜"
+                    SelectedDate="{Binding SelectedDate}" />
 
-    <TextBlock Grid.Row="4"
-               Grid.Column="0"
-               VerticalAlignment="Center"
-               Text="종료 시각" />
-    <StackPanel Grid.Row="4"
-                Grid.Column="1"
-                Orientation="Horizontal">
-      <ComboBox Width="72"
-                AutomationProperties.Name="종료 시각 오전 또는 오후"
-                ItemsSource="{Binding EndTime.Meridiems}"
-                SelectedItem="{Binding EndTime.Meridiem}" />
-      <TextBox Width="52"
-               Margin="8,0,0,0"
-               MaxLength="2"
-               AutomationProperties.HelpText="1부터 12까지 입력"
-               AutomationProperties.Name="종료 시각 시간"
-               behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
-               HorizontalContentAlignment="Right"
-               InputScope="Number"
-               Text="{Binding EndTime.HourText, UpdateSourceTrigger=PropertyChanged}" />
-      <TextBlock Margin="6,0"
-                 VerticalAlignment="Center"
-                 Text=":" />
-      <TextBox Width="52"
-               MaxLength="2"
-               AutomationProperties.HelpText="0부터 59까지 입력"
-               AutomationProperties.Name="종료 시각 분"
-               behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
-               HorizontalContentAlignment="Right"
-               InputScope="Number"
-               Text="{Binding EndTime.MinuteText, UpdateSourceTrigger=PropertyChanged}" />
-      <TextBlock Margin="10,0,0,0"
-                 VerticalAlignment="Center"
-                 Foreground="#FF5C6470"
-                 Text="(1~12시, 0~59분)" />
-    </StackPanel>
+        <Grid Margin="0,18,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="16" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
 
-    <TextBlock Grid.Row="6"
-               Grid.Column="0"
-               VerticalAlignment="Top"
-               Text="메모" />
-    <TextBox Grid.Row="6"
-             Grid.Column="1"
-             Height="76"
-             AcceptsReturn="True"
-             AutomationProperties.Name="예약 메모"
-             TextWrapping="Wrap"
-             VerticalScrollBarVisibility="Auto"
-             Text="{Binding Memo, UpdateSourceTrigger=PropertyChanged}" />
+          <Border Grid.Column="0"
+                  Background="{StaticResource Zara.Brush.Background}"
+                  BorderBrush="{StaticResource Zara.Brush.Border}"
+                  BorderThickness="1"
+                  CornerRadius="8"
+                  Padding="14">
+            <StackPanel>
+              <TextBlock Text="시작 시각" Style="{StaticResource Zara.SecondaryText}" Margin="0,0,0,10" />
+              <StackPanel Orientation="Horizontal">
+                <TextBox Width="55"
+                         MaxLength="2"
+                         FontSize="21"
+                         Style="{StaticResource Zara.TextBox}"
+                         AutomationProperties.HelpText="0부터 23까지 입력"
+                         AutomationProperties.Name="시작 시각 시간"
+                         behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
+                         InputScope="Number"
+                         Text="{Binding StartTime.HourText, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBlock Text=":" FontSize="21" VerticalAlignment="Center" Margin="6,0" />
+                <TextBox Width="55"
+                         MaxLength="2"
+                         FontSize="21"
+                         Style="{StaticResource Zara.TextBox}"
+                         AutomationProperties.HelpText="0부터 59까지 입력"
+                         AutomationProperties.Name="시작 시각 분"
+                         behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
+                         InputScope="Number"
+                         Text="{Binding StartTime.MinuteText, UpdateSourceTrigger=PropertyChanged}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
 
-    <StackPanel Grid.Row="8"
-                Grid.ColumnSpan="2"
-                HorizontalAlignment="Right"
-                Orientation="Horizontal">
-      <Button Width="88"
-              IsDefault="True"
-              Click="Save_Click"
-              Content="등록" />
-      <Button Width="88"
-              Margin="8,0,0,0"
-              IsCancel="True"
-              Content="취소" />
-    </StackPanel>
+          <Border Grid.Column="2"
+                  Background="{StaticResource Zara.Brush.Background}"
+                  BorderBrush="{StaticResource Zara.Brush.Border}"
+                  BorderThickness="1"
+                  CornerRadius="8"
+                  Padding="14">
+            <StackPanel>
+              <TextBlock Text="종료 시각" Style="{StaticResource Zara.SecondaryText}" Margin="0,0,0,10" />
+              <StackPanel Orientation="Horizontal">
+                <TextBox Width="55"
+                         MaxLength="2"
+                         FontSize="21"
+                         Style="{StaticResource Zara.TextBox}"
+                         AutomationProperties.HelpText="0부터 23까지 입력"
+                         AutomationProperties.Name="종료 시각 시간"
+                         behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
+                         InputScope="Number"
+                         Text="{Binding EndTime.HourText, UpdateSourceTrigger=PropertyChanged}" />
+                <TextBlock Text=":" FontSize="21" VerticalAlignment="Center" Margin="6,0" />
+                <TextBox Width="55"
+                         MaxLength="2"
+                         FontSize="21"
+                         Style="{StaticResource Zara.TextBox}"
+                         AutomationProperties.HelpText="0부터 59까지 입력"
+                         AutomationProperties.Name="종료 시각 분"
+                         behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
+                         InputScope="Number"
+                         Text="{Binding EndTime.MinuteText, UpdateSourceTrigger=PropertyChanged}" />
+              </StackPanel>
+            </StackPanel>
+          </Border>
+        </Grid>
+
+        <TextBlock Margin="0,12,0,0"
+                   TextWrapping="Wrap"
+                   Style="{StaticResource Zara.SecondaryText}"
+                   Text="시각은 24시간을 기준으로 입력해주세요. (예: 오후 07:30 → 19:30)" />
+
+        <TextBlock Text="메모" FontWeight="SemiBold" Margin="0,18,0,8" />
+        <TextBox Height="78"
+                 AcceptsReturn="True"
+                 Style="{StaticResource Zara.TextBox}"
+                 TextAlignment="Left"
+                 HorizontalContentAlignment="Left"
+                 VerticalContentAlignment="Top"
+                 AutomationProperties.Name="예약 메모"
+                 TextWrapping="Wrap"
+                 VerticalScrollBarVisibility="Auto"
+                 Text="{Binding Memo, UpdateSourceTrigger=PropertyChanged}" />
+
+        <StackPanel Margin="0,24,0,0" HorizontalAlignment="Right" Orientation="Horizontal">
+          <Button Width="88" Style="{StaticResource Zara.Button}" IsCancel="True" Content="취소" />
+          <Button Width="104" Margin="8,0,0,0" Style="{StaticResource Zara.PrimaryButton}"
+                  IsDefault="True" Click="Save_Click" Content="예약 등록" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
   </Grid>
 </Window>

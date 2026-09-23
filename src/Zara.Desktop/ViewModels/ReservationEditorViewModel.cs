@@ -14,8 +14,8 @@ internal sealed class ReservationEditorViewModel : INotifyPropertyChanged
     /// <summary>Initializes the dialog with the current date and midnight-to-one-hour interval.</summary>
     public ReservationEditorViewModel()
     {
-        StartTime = new TimeSelectionViewModel();
-        EndTime = new TimeSelectionViewModel();
+        StartTime = new TimeSelectionViewModel(use24HourClock: true);
+        EndTime = new TimeSelectionViewModel(use24HourClock: true);
         StartTime.Set(TimeOnly.MinValue);
         EndTime.Set(new TimeOnly(1, 0));
     }

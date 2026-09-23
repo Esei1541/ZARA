@@ -84,7 +84,11 @@ function Write-LocalBuildIdentity {
         branch = [string]$Identity.branch
         commit = ([string]$Identity.commit).ToLowerInvariant()
         buildsDirectory = [string]$Identity.buildsDirectory
-    } | ConvertTo-Json
+    }
+    if ($Identity.Contains('commitSubject')) {
+        $json.commitSubject = [string]$Identity.commitSubject
+    }
+    $json = $json | ConvertTo-Json
     [IO.File]::WriteAllText($Path, $json + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
 }
 

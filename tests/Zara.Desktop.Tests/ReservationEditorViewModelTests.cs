@@ -13,12 +13,10 @@ public sealed class ReservationEditorViewModelTests
             SelectedDate = new DateTime(2026, 8, 14),
             Memo = "야간 작업",
         };
-        viewModel.StartTime.Meridiem = "오후";
-        viewModel.StartTime.HourText = "11";
-        viewModel.StartTime.MinuteText = "5";
-        viewModel.EndTime.Meridiem = "오전";
-        viewModel.EndTime.HourText = "1";
-        viewModel.EndTime.MinuteText = "30";
+        viewModel.StartTime.HourText = "19";
+        viewModel.StartTime.MinuteText = "30";
+        viewModel.EndTime.HourText = "21";
+        viewModel.EndTime.MinuteText = "00";
 
         bool result = viewModel.TryCreateDraft(
             out ReservationDraft? draft,
@@ -28,9 +26,26 @@ public sealed class ReservationEditorViewModelTests
         Assert.AreEqual(string.Empty, validationMessage);
         Assert.IsNotNull(draft);
         Assert.AreEqual(new DateOnly(2026, 8, 14), draft.Date);
-        Assert.AreEqual(new TimeOnly(23, 5), draft.StartTime);
-        Assert.AreEqual(new TimeOnly(1, 30), draft.EndTime);
+        Assert.AreEqual(new TimeOnly(19, 30), draft.StartTime);
+        Assert.AreEqual(new TimeOnly(21, 0), draft.EndTime);
         Assert.AreEqual("야간 작업", draft.Memo);
+    }
+
+    [TestMethod]
+    public void EmptyMemoRemainsEmptyInReservationDraft()
+    {
+        var viewModel = new ReservationEditorViewModel();
+
+        bool result = viewModel.TryCreateDraft(
+            out ReservationDraft? draft,
+            out string validationMessage);
+
+        Assert.IsTrue(result);
+        Assert.AreEqual(string.Empty, validationMessage);
+        Assert.IsNotNull(draft);
+        Assert.AreEqual(new TimeOnly(0, 0), draft.StartTime);
+        Assert.AreEqual(new TimeOnly(1, 0), draft.EndTime);
+        Assert.AreEqual(string.Empty, draft.Memo);
     }
 
     [TestMethod]
@@ -51,8 +66,8 @@ public sealed class ReservationEditorViewModelTests
     }
 
     [TestMethod]
-    [DataRow("", "0", "시작 시각의 시간은 1부터 12까지의 정수로 입력하세요.")]
-    [DataRow("13", "0", "시작 시각의 시간은 1부터 12까지의 정수로 입력하세요.")]
+    [DataRow("", "0", "시작 시각의 시간은 0부터 23까지의 정수로 입력하세요.")]
+    [DataRow("24", "0", "시작 시각의 시간은 0부터 23까지의 정수로 입력하세요.")]
     [DataRow("12", "60", "시작 시각의 분은 0부터 59까지의 정수로 입력하세요.")]
     public void InvalidStartTimeReturnsFieldSpecificKoreanMessage(
         string hourText,

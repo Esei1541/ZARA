@@ -23,6 +23,8 @@ internal sealed class LocalBuildManifest
 
     public string Commit { get; set; } = string.Empty;
 
+    public string? CommitSubject { get; set; }
+
     public string InstallerFileName { get; set; } = string.Empty;
 
     public string InstallerSha256 { get; set; } = string.Empty;
@@ -45,7 +47,7 @@ internal sealed class LocalBuildManifest
         InstallerSha256 is { Length: 64 } && InstallerSha256.All(Uri.IsHexDigit);
 
     internal LocalBuildInfo ToInfo() => new(
-        BuildId, VersionName, Configuration, CreatedAt, Branch, Commit);
+        BuildId, VersionName, Configuration, CreatedAt, Branch, Commit, CommitSubject);
 
     internal static bool IsFileName(string? value) =>
         !string.IsNullOrWhiteSpace(value) &&

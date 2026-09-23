@@ -2,105 +2,192 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:ClassModifier="internal">
-  <Grid Margin="22">
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="16" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="12" />
-      <RowDefinition Height="*" />
-      <RowDefinition Height="12" />
-      <RowDefinition Height="Auto" />
-    </Grid.RowDefinitions>
-
-    <Border Padding="14"
-            Background="#FFFFFFFF"
-            BorderBrush="#FFD7DCE3"
-            BorderThickness="1"
-            CornerRadius="8">
-      <TextBlock Text="{Binding CurrentBuildText}"
-                 TextWrapping="Wrap" />
-    </Border>
-
-    <Grid Grid.Row="2">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="Auto" />
-        <ColumnDefinition Width="Auto" />
-      </Grid.ColumnDefinitions>
-      <TextBox Height="32"
-               Padding="8,4"
-               IsReadOnly="True"
-               Text="{Binding BuildsDirectory, Mode=OneWay}" />
-      <Button Grid.Column="1"
-              Width="104"
-              Height="32"
-              Margin="8,0,0,0"
-              Command="{Binding ChangeDirectoryCommand}"
-              Content="폴더 선택" />
-      <Button Grid.Column="2"
-              Width="88"
-              Height="32"
-              Margin="8,0,0,0"
-              Command="{Binding RefreshCommand}"
-              Content="새로고침" />
-    </Grid>
-
-    <DataGrid Grid.Row="4"
-              AutoGenerateColumns="False"
-              CanUserAddRows="False"
-              CanUserDeleteRows="False"
-              CanUserReorderColumns="False"
-              CanUserResizeRows="False"
-              CanUserSortColumns="False"
-              HeadersVisibility="Column"
-              IsEnabled="{Binding CanInteract}"
-              IsReadOnly="True"
-              ItemsSource="{Binding Builds}"
-              SelectedItem="{Binding SelectedBuild, Mode=TwoWay}">
-      <DataGrid.Columns>
-        <DataGridTextColumn Width="58" Binding="{Binding CurrentMarker}" Header="상태" />
-        <DataGridTextColumn Width="90" Binding="{Binding VersionName}" Header="버전" />
-        <DataGridTextColumn Width="86" Binding="{Binding Configuration}" Header="구성" />
-        <DataGridTextColumn Width="150" Binding="{Binding BuildId}" Header="빌드" />
-        <DataGridTextColumn Width="142" Binding="{Binding CreatedAtText}" Header="생성 시각" />
-        <DataGridTextColumn Width="120" Binding="{Binding Branch}" Header="브랜치" />
-        <DataGridTextColumn Width="100" Binding="{Binding Commit}" Header="커밋" />
-        <DataGridTextColumn Width="2*"
-                            MinWidth="180"
-                            Binding="{Binding Problem}"
-                            Header="상태 설명">
-          <DataGridTextColumn.ElementStyle>
-            <Style TargetType="TextBlock">
-              <Setter Property="TextTrimming" Value="CharacterEllipsis" />
-              <Setter Property="ToolTip" Value="{Binding Problem}" />
-            </Style>
-          </DataGridTextColumn.ElementStyle>
-        </DataGridTextColumn>
-      </DataGrid.Columns>
-    </DataGrid>
-
-    <Grid Grid.Row="6">
-      <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="Auto" />
-      </Grid.ColumnDefinitions>
-      <StackPanel VerticalAlignment="Center">
-        <TextBlock Foreground="#FF5C6470"
-                   Text="{Binding StatusMessage}"
-                   TextWrapping="Wrap" />
-        <TextBlock Margin="0,4,0,0"
-                   Foreground="#FFB42318"
-                   Text="{Binding ErrorMessage}"
-                   TextWrapping="Wrap" />
-      </StackPanel>
-      <Button Grid.Column="1"
-              Width="168"
-              Height="36"
-              Margin="16,0,0,0"
-              Command="{Binding InstallSelectedBuildCommand}"
-              Content="선택 빌드로 업데이트"
-              FontWeight="SemiBold" />
-    </Grid>
-  </Grid>
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="../Styles/SettingsStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+      <Style x:Key="BuildFactLabel" TargetType="TextBlock" BasedOn="{StaticResource Zara.SecondaryText}">
+        <Setter Property="Margin" Value="0,0,16,12" />
+        <Setter Property="VerticalAlignment" Value="Top" />
+      </Style>
+      <Style x:Key="BuildFactValue" TargetType="TextBlock">
+        <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+        <Setter Property="Margin" Value="0,0,0,12" />
+      </Style>
+      <Style x:Key="BuildRow" TargetType="ListBoxItem" BasedOn="{StaticResource Zara.DayItem}">
+        <Setter Property="Padding" Value="14" />
+        <Setter Property="Margin" Value="0,0,0,8" />
+      </Style>
+    </ResourceDictionary>
+  </UserControl.Resources>
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="22">
+      <TextBlock Text="빌드" Style="{StaticResource Zara.Heading}" FontSize="18" />
+      <Border Margin="0,18,0,18" Style="{StaticResource Zara.Panel}">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="Auto" />
+          </Grid.ColumnDefinitions>
+          <StackPanel>
+            <TextBlock Text="현재 실행 중" Style="{StaticResource Zara.SecondaryText}" />
+            <TextBlock Margin="0,6,0,0" Text="{Binding CurrentBuildVersionConfiguration}"
+                       FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource Zara.Brush.Text}" />
+          </StackPanel>
+          <StackPanel Grid.Column="1" Margin="16,0,0,0" HorizontalAlignment="Right">
+            <TextBlock Text="{Binding CurrentBuildBranch}" HorizontalAlignment="Right"
+                       MaxWidth="280" TextAlignment="Right" TextWrapping="Wrap"
+                       Style="{StaticResource Zara.SecondaryText}" />
+            <TextBlock Margin="0,4,0,0" Text="{Binding CurrentBuildShortCommit}"
+                       HorizontalAlignment="Right" FontFamily="Consolas"
+                       Foreground="{StaticResource Zara.Brush.Text}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+      <Grid Margin="0,0,0,18">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <TextBox Text="{Binding BuildsDirectory, Mode=OneWay}"
+                 Style="{StaticResource Zara.TextBox}" IsReadOnly="True"
+                 TextAlignment="Left" ToolTip="{Binding BuildsDirectory}"
+                 VerticalContentAlignment="Center" />
+        <Button Grid.Column="1" Margin="8,0,0,0" Style="{StaticResource Zara.Button}"
+                Command="{Binding ChangeDirectoryCommand}" Content="폴더 선택" />
+        <Button Grid.Column="2" Margin="8,0,0,0" Style="{StaticResource Zara.Button}"
+                Command="{Binding RefreshCommand}" Content="새로고침" />
+      </Grid>
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="9*" MinWidth="220" />
+          <ColumnDefinition Width="18" />
+          <ColumnDefinition Width="11*" MinWidth="300" />
+        </Grid.ColumnDefinitions>
+        <ListBox Grid.Column="0" ItemsSource="{Binding Builds}"
+                 SelectedItem="{Binding SelectedBuild, Mode=TwoWay}"
+                 IsEnabled="{Binding CanInteract}" ItemContainerStyle="{StaticResource BuildRow}"
+                 BorderThickness="0" Background="Transparent" Padding="0" MaxHeight="390"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <StackPanel>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="{Binding VersionName}" FontWeight="SemiBold"
+                               Foreground="{StaticResource Zara.Brush.Text}" />
+                    <TextBlock Margin="6,0,0,0" Text="{Binding Configuration}"
+                               Style="{StaticResource Zara.SecondaryText}" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <Border Grid.Column="1" Padding="7,2"
+                          Background="{StaticResource Zara.Brush.AccentSoft}" CornerRadius="5">
+                    <Border.Style>
+                      <Style TargetType="Border">
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding IsCurrent}" Value="False">
+                            <Setter Property="Visibility" Value="Collapsed" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </Border.Style>
+                    <TextBlock Text="현재 사용 중" Foreground="{StaticResource Zara.Brush.Accent}"
+                               FontSize="12" />
+                  </Border>
+                </Grid>
+                <TextBlock Margin="0,6,0,0" Text="{Binding BranchDisplay}"
+                           TextWrapping="Wrap" Foreground="{StaticResource Zara.Brush.Text}" />
+                <TextBlock Margin="0,5,0,0" Text="{Binding CreatedAtText}"
+                           Style="{StaticResource Zara.SecondaryText}" />
+              </StackPanel>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
+        <Border Grid.Column="2" Style="{StaticResource Zara.Panel}">
+          <Grid>
+            <TextBlock Text="목록에서 빌드를 선택하십시오."
+                       VerticalAlignment="Center" HorizontalAlignment="Center">
+              <TextBlock.Style>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource Zara.SecondaryText}">
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding HasSelectedBuild}" Value="True">
+                      <Setter Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </TextBlock.Style>
+            </TextBlock>
+            <StackPanel>
+              <StackPanel.Style>
+                <Style TargetType="StackPanel">
+                  <Setter Property="Visibility" Value="Collapsed" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding HasSelectedBuild}" Value="True">
+                      <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </StackPanel.Style>
+              <TextBlock Text="선택한 빌드" Style="{StaticResource Zara.Heading}" />
+              <Grid Margin="0,18,0,5">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="80" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="버전" Style="{StaticResource BuildFactLabel}" />
+                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedBuild.VersionName}" Style="{StaticResource BuildFactValue}" />
+                <TextBlock Grid.Row="1" Text="구성" Style="{StaticResource BuildFactLabel}" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedBuild.Configuration}" Style="{StaticResource BuildFactValue}" />
+                <TextBlock Grid.Row="2" Text="생성 시각" Style="{StaticResource BuildFactLabel}" />
+                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding SelectedBuild.CreatedAtText}" Style="{StaticResource BuildFactValue}" />
+                <TextBlock Grid.Row="3" Text="브랜치" Style="{StaticResource BuildFactLabel}" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding SelectedBuild.Branch}" Style="{StaticResource BuildFactValue}" FontFamily="Consolas" />
+                <TextBlock Grid.Row="4" Text="커밋 SHA" Style="{StaticResource BuildFactLabel}" />
+                <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding SelectedBuild.Commit}" Style="{StaticResource BuildFactValue}" FontFamily="Consolas" />
+                <TextBlock Grid.Row="5" Text="커밋 제목" Style="{StaticResource BuildFactLabel}" />
+                <TextBlock Grid.Row="5" Grid.Column="1" Text="{Binding SelectedBuild.CommitSubject}" Style="{StaticResource BuildFactValue}" />
+                <TextBlock Grid.Row="6" Text="빌드 ID" Style="{StaticResource BuildFactLabel}" />
+                <TextBlock Grid.Row="6" Grid.Column="1" Text="{Binding SelectedBuild.BuildId}" Style="{StaticResource BuildFactValue}" FontFamily="Consolas" />
+              </Grid>
+              <Border BorderBrush="{StaticResource Zara.Brush.Border}"
+                      BorderThickness="0,1,0,0" Padding="0,16,0,0">
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="{Binding SelectedBuild.StateText}"
+                             Style="{StaticResource Zara.SecondaryText}" VerticalAlignment="Center"
+                             TextWrapping="Wrap" />
+                  <Button Grid.Column="1" Margin="12,0,0,0"
+                          Style="{StaticResource Zara.PrimaryButton}"
+                          Command="{Binding InstallSelectedBuildCommand}"
+                          Content="선택 빌드로 업데이트" />
+                </Grid>
+              </Border>
+            </StackPanel>
+          </Grid>
+        </Border>
+      </Grid>
+      <TextBlock Margin="0,14,0,0" Text="{Binding StatusMessage}"
+                 Style="{StaticResource Zara.SecondaryText}" TextWrapping="Wrap" />
+      <TextBlock Margin="0,4,0,0" Text="{Binding ErrorMessage}"
+                 Style="{StaticResource Zara.ErrorText}" />
+    </StackPanel>
+  </ScrollViewer>
 </UserControl>

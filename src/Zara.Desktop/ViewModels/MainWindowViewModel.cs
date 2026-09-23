@@ -133,6 +133,7 @@ internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDis
             SaveEmergencyUnlockSettingsAsync,
             ReportEmergencyUnlockSettingsFailure,
             () => CanChangeUsagePolicySettings);
+        InitializeEmergencyAdjustmentCommands();
 #if DEBUG
         StartLockDemoCommand = new AsyncCommand(requestLock, ReportLockDemoFailure);
         DevelopmentUnlockCommand = new AsyncCommand(
@@ -260,7 +261,7 @@ internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDis
     public string EmergencyDurationMinutesText
     {
         get => _emergencyDurationMinutesText;
-        set => SetField(ref _emergencyDurationMinutesText, value);
+        set { if (SetField(ref _emergencyDurationMinutesText, value)) NotifyEmergencyAdjustments(); }
     }
 
     /// <summary>
@@ -270,13 +271,13 @@ internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDis
     public string EmergencySentenceCountText
     {
         get => _emergencySentenceCountText;
-        set => SetField(ref _emergencySentenceCountText, value);
+        set { if (SetField(ref _emergencySentenceCountText, value)) NotifyEmergencyAdjustments(); }
     }
 
     public bool EmergencyWeeklyLimitEnabled
     {
         get => _emergencyWeeklyLimitEnabled;
-        set => SetField(ref _emergencyWeeklyLimitEnabled, value);
+        set { if (SetField(ref _emergencyWeeklyLimitEnabled, value)) NotifyEmergencyAdjustments(); }
     }
 
     public DayOfWeek? EmergencyWeeklyResetDay
@@ -288,7 +289,7 @@ internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDis
     public string EmergencyWeeklyMaximumCountText
     {
         get => _emergencyWeeklyMaximumCountText;
-        set => SetField(ref _emergencyWeeklyMaximumCountText, value);
+        set { if (SetField(ref _emergencyWeeklyMaximumCountText, value)) NotifyEmergencyAdjustments(); }
     }
 
     /// <summary>Gets a read-only explanation of the current evaluated time-rule state.</summary>
@@ -559,12 +560,14 @@ internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDis
 
         UpdateReservationPresentation(snapshot.EvaluatedLocalTime);
         UsagePolicyStatusMessage = GetUsagePolicyStatusMessage(snapshot);
+        UpdateHeaderPresentation(snapshot);
         OnPropertyChanged(nameof(CanChangeSettings));
         OnPropertyChanged(nameof(CanEditExecutionSettings));
         OnPropertyChanged(nameof(CanChangeUsagePolicySettings));
         _saveExecutionSettingsCommand.NotifyCanExecuteChanged();
         _saveWeeklyScheduleCommand.NotifyCanExecuteChanged();
         _saveEmergencyUnlockSettingsCommand.NotifyCanExecuteChanged();
+        NotifyEmergencyAdjustments();
         if (!CanChangeSettings)
         {
             ClearWeeklyScheduleConfirmation();
@@ -601,7 +604,7 @@ internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDis
             DateTime? nextLockStart = snapshot.NextLockStartLocalTime;
             if (nextLockStart is null)
             {
-                message = "지금은 설정된 사용 금지 시각이 없습니다.";
+                message = "지금은 설정된 사용 금지 시간대가 없습니다.";
             }
             else
             {
@@ -699,8 +702,8 @@ internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDis
     {
         string message = GetSettingsFailureMessage(
             exception,
-            "사용 금지 시각을 저장하지 못했습니다. 잠시 후 다시 시도하세요.");
-        RequestNotification("사용 금지 시각", message, isError: true);
+            "사용 금지 시간대를 저장하지 못했습니다. 잠시 후 다시 시도하세요.");
+        RequestNotification("사용 금지 시간대", message, isError: true);
     }
 
     private void ReportEmergencyUnlockSettingsFailure(Exception exception)

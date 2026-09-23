@@ -11,6 +11,46 @@ public sealed class MainWindowViewModelTests
     private static readonly bool[] FirstLockEndsThenSecondLockStarts = [true, false, true];
     private static readonly int[] ReminderMinutes = [30, 10, 5, 1];
 
+    [TestMethod]
+    [DataRow(DayOfWeek.Wednesday, "수요일", 19, 20, "수요일", "1시간")]
+    [DataRow(DayOfWeek.Sunday, "일요일", 23, 5, "월요일", "6시간")]
+    public void ScheduleLabelsNameBothWeekdays(DayOfWeek day, string name, int startHour, int endHour, string endDay, string duration)
+    {
+        var editor = new DailyUsageRestrictionViewModel(day, name);
+        editor.Load(new DailyUsageRestriction(true, new TimeOnly(startHour, 0), new TimeOnly(endHour, 0)));
+
+        Assert.AreEqual(name, editor.EditorTitle);
+        Assert.AreEqual(endDay, editor.EndDay);
+        Assert.AreEqual($"{name} {startHour:00}:00 → {endDay} {endHour:00}:00 · {duration}", editor.DraftSummary);
+        Assert.AreEqual($"현재 설정: {startHour:00}:00 → {endDay} {endHour:00}:00", editor.SavedDescription);
+        editor.ReleaseTime.HourText = "23";
+        Assert.AreEqual(name, editor.EndDay);
+    }
+
+    [STATestMethod]
+    public async Task EmergencyAdjustmentsRespectBoundsAndWaitForSave()
+    {
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        using var runtime = CreateRuntime(store, new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+
+        viewModel.IncreaseEmergencyDurationCommand.Execute(null);
+        Assert.AreEqual("11", viewModel.EmergencyDurationMinutesText);
+        Assert.AreEqual(10, store.Settings.EmergencyUnlock.DurationMinutes);
+        viewModel.EmergencyDurationMinutesText = "60";
+        Assert.IsFalse(viewModel.IncreaseEmergencyDurationCommand.CanExecute(null));
+        viewModel.EmergencySentenceCountText = "0";
+        Assert.IsFalse(viewModel.DecreaseEmergencySentenceCountCommand.CanExecute(null));
+        viewModel.EmergencyDurationMinutesText = string.Empty;
+        Assert.IsFalse(viewModel.DecreaseEmergencyDurationCommand.CanExecute(null));
+        Assert.IsFalse(viewModel.IncreaseEmergencyMaximumCommand.CanExecute(null));
+        viewModel.EmergencyWeeklyLimitEnabled = true;
+        viewModel.IncreaseEmergencyMaximumCommand.Execute(null);
+        Assert.AreEqual("4", viewModel.EmergencyWeeklyMaximumCountText);
+        Assert.IsFalse(viewModel.IsEmergencyQuotaVisible);
+    }
+
     [STATestMethod]
     public async Task RuntimeStateChangeDoesNotOverwriteUnsavedScheduleText()
     {
@@ -90,11 +130,15 @@ public sealed class MainWindowViewModelTests
         using var viewModel = CreateViewModel(runtime);
 
         Assert.AreEqual("다음 잠금까지 01:00:00 남았습니다.", viewModel.UsagePolicyStatusMessage);
+        Assert.AreEqual("다음 잠금까지", viewModel.HeaderLockLabel);
+        Assert.AreEqual("01:00:00", viewModel.HeaderLockValue);
+        Assert.AreEqual("오늘 09:00", viewModel.HeaderLockDetail);
 
         timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 8, 0, 1, TimeSpan.Zero));
         await runtime.RefreshAsync();
 
         Assert.AreEqual("다음 잠금까지 00:59:59 남았습니다.", viewModel.UsagePolicyStatusMessage);
+        Assert.AreEqual("00:59:59", viewModel.HeaderLockValue);
     }
 
     [STATestMethod]
@@ -108,7 +152,7 @@ public sealed class MainWindowViewModelTests
         using var viewModel = CreateViewModel(runtime);
 
         Assert.AreEqual(
-            "지금은 설정된 사용 금지 시각이 없습니다.",
+            "지금은 설정된 사용 금지 시간대가 없습니다.",
             viewModel.UsagePolicyStatusMessage);
     }
 
@@ -343,7 +387,7 @@ public sealed class MainWindowViewModelTests
 
         Assert.IsTrue(AllWeekdaysAreDisabled(store.Settings.WeeklySchedule));
         Assert.AreEqual(
-            "지금은 설정된 사용 금지 시각이 없습니다.",
+            "지금은 설정된 사용 금지 시간대가 없습니다.",
             viewModel.UsagePolicyStatusMessage);
     }
 
@@ -514,9 +558,9 @@ public sealed class MainWindowViewModelTests
         Assert.AreEqual(2, store.SaveCount);
         Assert.HasCount(2, notifications);
         Assert.IsTrue(notifications.All(notification => !notification.IsError));
-        Assert.IsTrue(notifications.All(notification => notification.Title == "사용 금지 시각"));
+        Assert.IsTrue(notifications.All(notification => notification.Title == "사용 금지 시간대"));
         Assert.IsTrue(notifications.All(notification =>
-            notification.Message == "사용 금지 시각을 저장했습니다."));
+            notification.Message == "사용 금지 시간대를 저장했습니다."));
     }
 
     [STATestMethod]
@@ -549,7 +593,7 @@ public sealed class MainWindowViewModelTests
             TimeSpan.FromSeconds(5));
 
         Assert.IsTrue(result.IsError);
-        Assert.AreEqual("사용 금지 시각", result.Title);
+        Assert.AreEqual("사용 금지 시간대", result.Title);
         Assert.AreEqual(
             "설정은 저장했습니다. 현재 잠금 상태를 적용하지 못해 자동으로 다시 시도합니다.",
             result.Message);
@@ -688,6 +732,7 @@ public sealed class MainWindowViewModelTests
                 DayOfWeek.Saturday },
             viewModel.EmergencyWeeklyResetDays.Select(day => day.Key).ToArray());
         Assert.AreEqual(DayOfWeek.Sunday, viewModel.EmergencyWeeklyResetDay);
+        Assert.IsFalse(viewModel.IsEmergencyQuotaVisible);
 
         viewModel.WeekdayRestrictions.Single(day => day.DayOfWeek == DayOfWeek.Monday)
             .IsRestrictionEnabled = true;
@@ -701,6 +746,9 @@ public sealed class MainWindowViewModelTests
         Assert.AreEqual(DayOfWeek.Friday, store.Settings.EmergencyUnlock.WeeklyResetDay);
         Assert.AreEqual(7, store.Settings.EmergencyUnlock.WeeklyMaximumCount);
         Assert.IsFalse(store.Settings.WeeklySchedule.Monday.IsEnabled);
+        Assert.IsTrue(viewModel.IsEmergencyQuotaVisible);
+        Assert.AreEqual("7회", viewModel.HeaderEmergencyRemaining);
+        Assert.AreEqual("금요일 초기화", viewModel.HeaderEmergencyReset);
     }
 
     [STATestMethod]
@@ -760,6 +808,9 @@ public sealed class MainWindowViewModelTests
         Assert.AreEqual(
             "현재는 사용 금지 시간입니다. 설정을 바꿀 수 없습니다. (남은 긴급 해제 2회)",
             viewModel.UsagePolicyStatusMessage);
+        Assert.AreEqual("잠금 중", viewModel.HeaderLockValue);
+        Assert.AreEqual("2회", viewModel.HeaderEmergencyRemaining);
+        Assert.AreEqual("일요일 초기화", viewModel.HeaderEmergencyReset);
     }
 
     [STATestMethod]
@@ -832,6 +883,9 @@ public sealed class MainWindowViewModelTests
         Assert.IsFalse(viewModel.EmergencyWeeklyLimitEnabled);
         Assert.AreEqual(DayOfWeek.Friday, viewModel.EmergencyWeeklyResetDay);
         Assert.AreEqual("7", viewModel.EmergencyWeeklyMaximumCountText);
+        Assert.IsTrue(viewModel.IsEmergencyQuotaVisible);
+        Assert.AreEqual("5회", viewModel.HeaderEmergencyRemaining);
+        Assert.AreEqual("화요일 초기화", viewModel.HeaderEmergencyReset);
 
         viewModel.ResetEmergencyUnlockEdits();
 
@@ -865,6 +919,9 @@ public sealed class MainWindowViewModelTests
         Assert.AreEqual(
             "긴급 해제가 적용 중입니다. 사용 금지 시간이라 설정은 바꿀 수 없습니다. (남은 긴급 해제 0회)",
             viewModel.UsagePolicyStatusMessage);
+        Assert.AreEqual("00:10:00", viewModel.HeaderLockValue);
+        Assert.AreEqual($"긴급 해제 중 · 오늘 {runtime.CurrentSnapshot.NextLockStartLocalTime:HH:mm}", viewModel.HeaderLockDetail);
+        Assert.AreEqual("0회", viewModel.HeaderEmergencyRemaining);
     }
 
     [STATestMethod]
@@ -924,7 +981,7 @@ public sealed class MainWindowViewModelTests
         Assert.AreEqual("19:30", wednesday.StartTime.DisplayTime);
         Assert.IsFalse(wednesday.HasChanges);
         Assert.IsTrue(thursday.HasChanges);
-        Assert.AreEqual("다음 날 해제", thursday.EndDay);
+        Assert.AreEqual("금요일", thursday.EndDay);
         Assert.AreEqual(1, store.SaveCount);
         viewModel.DiscardWeeklyScheduleCommand.Execute(null);
         Assert.IsFalse(viewModel.HasWeeklyScheduleChanges);

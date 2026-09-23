@@ -7,7 +7,14 @@ function Invoke-ZaraGit {
         [switch]$AllowEmpty
     )
 
-    $output = @(& git -C $WorktreeRoot @Arguments 2>&1)
+    $originalOutputEncoding = [Console]::OutputEncoding
+    try {
+        [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+        $output = @(& git -C $WorktreeRoot @Arguments 2>&1)
+    }
+    finally {
+        [Console]::OutputEncoding = $originalOutputEncoding
+    }
     if ($LASTEXITCODE -ne 0) {
         throw "Git failed ($LASTEXITCODE): git $($Arguments -join ' ')`n$($output -join [Environment]::NewLine)"
     }
@@ -38,6 +45,7 @@ function Get-ZaraLocalBuildGitIdentity {
         throw "Git returned an invalid commit: $commit"
     }
     $branch = Invoke-ZaraGit $resolvedWorktree @('branch', '--show-current') -AllowEmpty
+    $subject = Invoke-ZaraGit $resolvedWorktree @('-c', 'i18n.logOutputEncoding=utf-8', 'log', '-1', '--format=%s', 'HEAD')
     if ([string]::IsNullOrWhiteSpace($branch)) {
         $branch = $commit.Substring(0, 12).ToLowerInvariant()
     }
@@ -49,6 +57,7 @@ function Get-ZaraLocalBuildGitIdentity {
         GitCommonDirectory = $commonDirectory
         Branch = $branch
         Commit = $commit.ToLowerInvariant()
+        CommitSubject = $subject
         IsClean = [string]::IsNullOrWhiteSpace($sourceChanges)
     }
 }
@@ -121,7 +130,8 @@ function Publish-ZaraLocalBuildManifest {
         [Parameter(Mandatory = $true)][ValidateSet('Debug', 'Staging')][string]$Configuration,
         [Parameter(Mandatory = $true)][string]$CreatedAt,
         [Parameter(Mandatory = $true)][string]$Branch,
-        [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$Commit
+        [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$Commit,
+        [string]$CommitSubject
     )
 
     $installerFileName = $BuildId + '.exe'
@@ -138,6 +148,7 @@ function Publish-ZaraLocalBuildManifest {
         createdAt = $CreatedAt
         branch = $Branch
         commit = $Commit.ToLowerInvariant()
+        commitSubject = $CommitSubject
         installerFileName = $installerFileName
         installerSha256 = $hash
     }

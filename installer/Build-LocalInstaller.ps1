@@ -67,6 +67,7 @@ function Invoke-BuildLocalInstaller {
         createdAt = $createdAt.ToString('o')
         branch = $initialIdentity.Branch
         commit = $initialIdentity.Commit
+        commitSubject = $initialIdentity.CommitSubject
         buildsDirectory = [IO.Path]::GetFullPath($resolvedBuildsDirectory)
     }
 
@@ -81,7 +82,8 @@ function Invoke-BuildLocalInstaller {
 
     return Publish-ZaraLocalBuildManifest -BuildDirectory $reservation.Path -BuildId $reservation.BuildId `
         -VersionName $versionName -Configuration $Configuration -CreatedAt $createdAt.ToString('o') `
-        -Branch $initialIdentity.Branch -Commit $initialIdentity.Commit
+        -Branch $initialIdentity.Branch -Commit $initialIdentity.Commit `
+        -CommitSubject $initialIdentity.CommitSubject
 }
 
 if ($MyInvocation.InvocationName -ne '.') {

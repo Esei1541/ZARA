@@ -21,22 +21,22 @@
       <RowDefinition Height="Auto" />
     </Grid.RowDefinitions>
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-      <Grid Margin="18">
+      <Grid Margin="22">
         <Grid.ColumnDefinitions>
           <ColumnDefinition Width="0.85*" MinWidth="210" />
           <ColumnDefinition Width="20" />
           <ColumnDefinition Width="1.25*" MinWidth="340" />
         </Grid.ColumnDefinitions>
         <StackPanel>
-          <TextBlock Text="요일별 잠금 시간" Style="{StaticResource Zara.Heading}" />
-          <TextBlock Text="현재 적용 중인 일정" Margin="0,4,0,14" Style="{StaticResource Zara.SecondaryText}" />
+          <TextBlock Text="사용 금지 시간대 설정" Style="{StaticResource Zara.SectionTitle}" />
+          <TextBlock Text="요일에 따라 일정을 설정합니다." Margin="0,4,0,14" Style="{StaticResource Zara.SecondaryText}" />
           <ListBox x:Name="WeekdayList" ItemsSource="{Binding WeekdayRestrictions}"
                    SelectedItem="{Binding SelectedWeekday, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                    ItemContainerStyle="{StaticResource Zara.DayItem}"
                    Background="Transparent" BorderThickness="0"
                    ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                    ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                   AutomationProperties.Name="요일별 잠금 시간">
+                   AutomationProperties.Name="사용 금지 시간대 설정">
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <Grid>
@@ -82,7 +82,7 @@
                   <StackPanel>
                     <TextBlock Text="잠금 시작" />
                     <TextBlock Text="{Binding StartTime.DisplayTime}" Style="{StaticResource Zara.TimeText}" />
-                    <TextBlock Text="24시간제" Style="{StaticResource Zara.SecondaryText}" />
+                    <TextBlock Text="{Binding DisplayName}" Style="{StaticResource Zara.SecondaryText}" />
                   </StackPanel>
                 </RadioButton>
                 <RadioButton x:Name="ReleaseTimeButton" Grid.Column="2" GroupName="ScheduleEndpoint"

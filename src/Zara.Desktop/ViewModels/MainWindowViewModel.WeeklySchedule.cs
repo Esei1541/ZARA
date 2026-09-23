@@ -73,7 +73,7 @@ internal sealed partial class MainWindowViewModel
 
             ClearWeeklyScheduleConfirmation();
             ResetWeeklyScheduleEdits();
-            RequestNotification("사용 금지 시각", "사용 금지 시각을 저장했습니다.", isError: false);
+            RequestNotification("사용 금지 시간대", "사용 금지 시간대를 저장했습니다.", isError: false);
         }
         finally
         {

@@ -39,12 +39,12 @@ internal sealed class DailyUsageRestrictionViewModel : INotifyPropertyChanged
     public ICommand LaterHalfHourCommand => _adjustmentCommands[2];
     public ICommand LaterHourCommand => _adjustmentCommands[3];
 
-    public string EditorTitle => $"{DisplayName} 편집";
+    public string EditorTitle => DisplayName;
     public string SavedSummary => FormatRestriction(_savedRestriction);
-    public string SavedDescription => $"현재 적용: {SavedSummary}";
+    public string SavedDescription => $"현재 설정: {SavedSummary}";
     public string ChangeStatus => HasChanges ? "편집 중 · 저장 전" : "적용 중";
-    public string EndDay => StartTime.IsValid && ReleaseTime.IsValid &&
-        ReleaseTime.ToTimeOnly() < StartTime.ToTimeOnly() ? "다음 날 해제" : "같은 날";
+    public string EndDay => GetEndDay(StartTime.IsValid && ReleaseTime.IsValid &&
+        ReleaseTime.ToTimeOnly() < StartTime.ToTimeOnly());
 
     public bool HasChanges => !TryGetRestriction(out DailyUsageRestriction? rule) || rule != _savedRestriction;
 
@@ -202,10 +202,13 @@ internal sealed class DailyUsageRestrictionViewModel : INotifyPropertyChanged
         }
     }
 
-    private static string FormatRestriction(DailyUsageRestriction rule) => !rule.IsEnabled
+    private string GetEndDay(bool nextDay) => CultureInfo.GetCultureInfo("ko-KR")
+        .DateTimeFormat.GetDayName(nextDay ? (DayOfWeek)(((int)DayOfWeek + 1) % 7) : DayOfWeek);
+
+    private string FormatRestriction(DailyUsageRestriction rule) => !rule.IsEnabled
         ? "사용 안 함"
         : string.Create(CultureInfo.InvariantCulture,
-            $"{rule.StartTime:HH:mm} → {(rule.ReleaseTime < rule.StartTime ? "다음 날 " : string.Empty)}{rule.ReleaseTime:HH:mm}");
+            $"{rule.StartTime:HH:mm} → {GetEndDay(rule.ReleaseTime < rule.StartTime)} {rule.ReleaseTime:HH:mm}");
 
     private AsyncCommand CreateAdjustmentCommand(int delta) => new(
         () =>

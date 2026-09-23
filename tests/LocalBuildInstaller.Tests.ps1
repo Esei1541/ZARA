@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $script:repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $script:commonScriptPath = Join-Path $script:repoRoot 'installer\LocalBuild.Common.ps1'
@@ -34,8 +34,18 @@ Describe 'Local build identity helpers' {
         & git -C $repository init --quiet
         Set-Content -LiteralPath (Join-Path $repository 'tracked.txt') -Value 'tracked' -Encoding UTF8
         & git -C $repository add tracked.txt
-        & git -C $repository -c user.name=ZaraTest -c user.email=zara@example.invalid commit --quiet -m baseline
-        (Get-ZaraLocalBuildGitIdentity $repository).IsClean | Should Be $true
+        & git -C $repository -c user.name=ZaraTest -c user.email=zara@example.invalid commit --quiet -m 'fix: 시험 제목' -m '본문은 표시하지 않음'
+        $originalOutputEncoding = [Console]::OutputEncoding
+        try {
+            [Console]::OutputEncoding = [Text.Encoding]::GetEncoding(437)
+            $identity = Get-ZaraLocalBuildGitIdentity $repository
+            [Console]::OutputEncoding.CodePage | Should Be 437
+        }
+        finally {
+            [Console]::OutputEncoding = $originalOutputEncoding
+        }
+        $identity.IsClean | Should Be $true
+        $identity.CommitSubject | Should Be 'fix: 시험 제목'
 
         Set-Content -LiteralPath (Join-Path $repository 'NewSource.cs') -Value 'class NewSource {}' -Encoding UTF8
 
@@ -53,14 +63,16 @@ Describe 'Build-LocalInstaller.ps1 completion contract' {
 
         $publishedInstaller = Publish-ZaraLocalBuildManifest -BuildDirectory $buildDirectory `
             -BuildId $buildId -VersionName '1.0.1' -Configuration Staging `
-            -CreatedAt '2026-09-23T14:15:16+09:00' -Branch '260923-local-build' -Commit ('a' * 40)
-        $manifest = Get-Content -LiteralPath (Join-Path $buildDirectory 'build.json') -Raw | ConvertFrom-Json
+            -CreatedAt '2026-09-23T14:15:16+09:00' -Branch '260923-local-build' -Commit ('a' * 40) `
+            -CommitSubject 'fix: 시험 제목'
+        $manifest = Get-Content -LiteralPath (Join-Path $buildDirectory 'build.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 
         $publishedInstaller | Should Be $installer
-        ($manifest.psobject.Properties.Name -join ',') | Should Be 'schemaVersion,buildId,versionName,configuration,createdAt,branch,commit,installerFileName,installerSha256'
+        ($manifest.psobject.Properties.Name -join ',') | Should Be 'schemaVersion,buildId,versionName,configuration,createdAt,branch,commit,commitSubject,installerFileName,installerSha256'
         $manifest.schemaVersion | Should Be 1
         $manifest.configuration | Should Be 'Staging'
         $manifest.commit | Should Be ('a' * 40)
+        $manifest.commitSubject | Should Be 'fix: 시험 제목'
         $manifest.installerFileName | Should Be ([IO.Path]::GetFileName($installer))
         $manifest.installerSha256 | Should Match '^[0-9a-f]{64}$'
         [DateTimeOffset]::Parse($manifest.createdAt) | Out-Null
@@ -105,15 +117,17 @@ Describe 'Installer configuration contracts' {
                 createdAt = '2026-09-23T14:15:16+09:00'
                 branch = '260923-feature'
                 commit = 'A' * 40
+                commitSubject = 'fix: 시험 제목'
                 buildsDirectory = 'G:\repo\artifacts\local-builds'
                 installerFileName = 'excluded.exe'
                 installerSha256 = 'f' * 64
             }) $path
-        $identity = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+        $identity = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
 
         ($identity.psobject.Properties.Name -join ',') |
-            Should Be 'schemaVersion,buildId,versionName,configuration,createdAt,branch,commit,buildsDirectory'
+            Should Be 'schemaVersion,buildId,versionName,configuration,createdAt,branch,commit,buildsDirectory,commitSubject'
         $identity.commit | Should Be ('a' * 40)
+        $identity.commitSubject | Should Be 'fix: 시험 제목'
     }
 
     It 'reads Version when later conditional property groups do not define it' {

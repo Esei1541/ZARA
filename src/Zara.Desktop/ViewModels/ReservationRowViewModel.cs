@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using Zara.Core.UsagePolicy;
 
@@ -32,6 +33,10 @@ internal sealed class ReservationRowViewModel : INotifyPropertyChanged
 
     public string Memo => Reservation.Memo;
 
+    public string WeekdayText => CultureInfo.GetCultureInfo("ko-KR").DateTimeFormat.GetDayName(Date.DayOfWeek);
+
+    public string TimeRange => string.Create(CultureInfo.InvariantCulture, $"{StartTime:HH:mm} → {EndTime:HH:mm}");
+
     /// <summary>Gets whether the current local time is inside this reservation.</summary>
     public bool IsActive
     {
@@ -46,7 +51,7 @@ internal sealed class ReservationRowViewModel : INotifyPropertyChanged
     }
 
     /// <summary>Gets the Korean status label displayed in the reservation list.</summary>
-    public string ActiveStatusText => IsActive ? "적용 중" : "대기";
+    public string ActiveStatusText => IsActive ? "적용 중" : "예정";
 
     /// <summary>Refreshes UI-only appearance from the supplied local time.</summary>
     public void UpdatePresentation(DateTime localNow)
