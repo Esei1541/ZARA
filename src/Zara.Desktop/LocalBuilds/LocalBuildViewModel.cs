@@ -112,6 +112,7 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
         {
             _statusMessage = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(HasStatusMessage));
         }
     }
 
@@ -122,6 +123,7 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
         {
             _errorMessage = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(HasErrorMessage));
         }
     }
 
@@ -129,6 +131,8 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
     public bool CanInteract => !IsDisposed && !IsBusy;
     public bool CanInstallSelected => CanInstallSelectedBuild();
     public bool HasSelectedBuild => SelectedBuild is not null;
+    public bool HasStatusMessage => !string.IsNullOrWhiteSpace(StatusMessage);
+    public bool HasErrorMessage => !string.IsNullOrWhiteSpace(ErrorMessage);
     public ICommand RefreshCommand => _refreshCommand;
     public ICommand ChangeDirectoryCommand => _changeDirectoryCommand;
     public ICommand InstallSelectedBuildCommand => _installSelectedBuildCommand;
@@ -266,13 +270,17 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
     private void ApplyCatalog(LocalBuildCatalog catalog)
     {
         ArgumentNullException.ThrowIfNull(catalog);
+        string? previouslySelectedBuildId = _selectedBuild?.BuildId;
         string? currentBuildId = catalog.CurrentBuild?.BuildId;
         Builds = catalog.Builds
             .Select(entry => new LocalBuildItemViewModel(
                 entry,
                 string.Equals(entry.Build.BuildId, currentBuildId, StringComparison.Ordinal)))
             .ToArray();
-        _selectedBuild = null;
+        _selectedBuild = Builds.FirstOrDefault(build =>
+            string.Equals(build.BuildId, previouslySelectedBuildId, StringComparison.Ordinal))
+            ?? Builds.FirstOrDefault(build => build.IsCurrent)
+            ?? (Builds.Count > 0 ? Builds[0] : null);
         OnPropertyChanged(nameof(SelectedBuild));
         OnPropertyChanged(nameof(HasSelectedBuild));
         BuildsDirectory = catalog.BuildsDirectory;
@@ -288,7 +296,7 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
             ? catalog.Message
             : Builds.Count == 0
                 ? "설치할 수 있는 로컬 빌드가 없습니다."
-                : $"로컬 빌드 {Builds.Count}개를 불러왔습니다.";
+                : null;
         OnPropertyChanged(nameof(CanInstallSelected));
         _installSelectedBuildCommand.NotifyCanExecuteChanged();
     }

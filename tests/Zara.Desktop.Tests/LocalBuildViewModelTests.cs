@@ -51,13 +51,64 @@ public sealed class LocalBuildViewModelTests
         Assert.IsTrue(viewModel.Builds[2].CanInstall);
         Assert.AreEqual("확인 불가", viewModel.Builds[3].VersionName);
         Assert.AreEqual("확인 불가", viewModel.Builds[3].CreatedAtText);
+        Assert.AreEqual("확인 불가", viewModel.Builds[3].CreatedAtMinuteText);
         Assert.IsFalse(viewModel.Builds[3].CanInstall);
         Assert.AreEqual("기록된 커밋 제목이 없습니다.", viewModel.Builds[3].CommitSubject);
         Assert.AreEqual("1.0.1 · Staging", viewModel.CurrentBuildVersionConfiguration);
         Assert.AreEqual(current.Commit[..7], viewModel.CurrentBuildShortCommit);
-        Assert.IsFalse(viewModel.HasSelectedBuild);
+        Assert.AreSame(viewModel.Builds[1], viewModel.SelectedBuild);
+        Assert.IsTrue(viewModel.HasSelectedBuild);
+        Assert.IsNull(viewModel.StatusMessage);
         viewModel.SelectedBuild = viewModel.Builds[0];
         Assert.IsTrue(viewModel.HasSelectedBuild);
+        Assert.AreEqual("2026-09-23 10:03", viewModel.SelectedBuild.CreatedAtMinuteText);
+    }
+
+    [TestMethod]
+    public void CommitMessageShowsOnlyItsTitle()
+    {
+        LocalBuildInfo build = Build("build", "1.0.1", "Staging", minute: 1)
+            with { CommitSubject = "fix: 빌드 제목 표시\n\n- 본문 첫 줄\n- 본문 둘째 줄" };
+        var item = new LocalBuildItemViewModel(new LocalBuildEntry(build, null), isCurrent: false);
+
+        Assert.AreEqual("fix: 빌드 제목 표시", item.CommitSubject);
+    }
+
+    [TestMethod]
+    public async Task RefreshKeepsSelectionAndFallsBackToCurrentThenFirstBuild()
+    {
+        LocalBuildInfo first = Build("first", "1.0.1", "Staging", minute: 3);
+        LocalBuildInfo current = Build("current", "1.0.1", "Staging", minute: 2);
+        LocalBuildInfo other = Build("other", "1.0.0", "Staging", minute: 1);
+        var updates = new RecordingUpdates
+        {
+            Catalog = new LocalBuildCatalog("C:\\Builds", current,
+                [new LocalBuildEntry(first, null), new LocalBuildEntry(current, null), new LocalBuildEntry(other, null)],
+                Message: null),
+        };
+        using var viewModel = CreateViewModel(updates);
+
+        await viewModel.EnterAsync();
+        Assert.AreEqual("current", viewModel.SelectedBuild?.BuildId);
+
+        viewModel.SelectedBuild = viewModel.Builds[2];
+        await viewModel.RefreshAsync();
+        Assert.AreEqual("other", viewModel.SelectedBuild?.BuildId);
+
+        updates.Catalog = updates.Catalog with
+        {
+            Builds = [new LocalBuildEntry(first, null), new LocalBuildEntry(current, null)],
+        };
+        await viewModel.RefreshAsync();
+        Assert.AreEqual("current", viewModel.SelectedBuild?.BuildId);
+
+        updates.Catalog = updates.Catalog with
+        {
+            CurrentBuild = null,
+            Builds = [new LocalBuildEntry(first, null)],
+        };
+        await viewModel.RefreshAsync();
+        Assert.AreEqual("first", viewModel.SelectedBuild?.BuildId);
     }
 
     [TestMethod]

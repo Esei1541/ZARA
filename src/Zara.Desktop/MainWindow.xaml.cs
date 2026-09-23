@@ -158,18 +158,11 @@ public partial class MainWindow : Window
 
     private bool ConfirmLocalBuildInstall(LocalBuildItemViewModel build)
     {
-        MessageBoxResult result = System.Windows.MessageBox.Show(
-            this,
-            "선택한 빌드로 ZARA를 업데이트하시겠습니까?\n\n" +
-            $"버전: {build.VersionName}\n" +
-            $"구성: {build.Configuration}\n" +
-            $"빌드: {build.BuildId}\n\n" +
-            "설치 관리자를 시작하면 ZARA가 종료되고 업데이트 후 다시 시작됩니다.",
-            "로컬 빌드 업데이트",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning,
-            MessageBoxResult.No);
-        return result == MessageBoxResult.Yes;
+        return ShowSettingsDialog(new SettingsMessageDialog(
+            "선택 빌드로 업데이트",
+            "ZARA를 종료하고 선택한 빌드의 설치를 시작합니다.",
+            $"{build.VersionName} · {build.Configuration}\n{build.Branch}\n{build.CreatedAtText}",
+            "업데이트")) == true;
     }
 #endif
 
@@ -187,7 +180,7 @@ public partial class MainWindow : Window
         {
             Owner = this,
         };
-        if (dialog.ShowDialog() != true || dialog.Draft is null)
+        if (ShowSettingsDialog(dialog) != true || dialog.Draft is null)
         {
             return;
         }
@@ -226,6 +219,18 @@ public partial class MainWindow : Window
             return;
         }
 
+        string details = $"{reservation.Date:yyyy.MM.dd} · {reservation.TimeRange}";
+        if (!string.IsNullOrEmpty(reservation.Memo))
+        {
+            details += $"\n{reservation.Memo}";
+        }
+
+        if (ShowSettingsDialog(new SettingsMessageDialog(
+            "예약 삭제", "선택한 예약을 삭제하시겠습니까?", details, "삭제")) != true)
+        {
+            return;
+        }
+
         try
         {
             ReservationChangeStatus status = await _viewModel
@@ -243,6 +248,13 @@ public partial class MainWindow : Window
         {
             ShowMessage("예약을 삭제하지 못했습니다. 잠시 후 다시 시도하세요.", MessageBoxImage.Error);
         }
+    }
+
+    private void ReservationGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        ReservationDateColumn.Width = new DataGridLength(e.NewSize.Width * 0.22);
+        ReservationTimeColumn.Width = new DataGridLength(e.NewSize.Width * 0.22);
+        ReservationStateColumn.Width = new DataGridLength(e.NewSize.Width * 0.13);
     }
 
     private void ShowReservationAddResult(ReservationChangeStatus status)
@@ -286,11 +298,28 @@ public partial class MainWindow : Window
     private void ShowMessage(
         string message,
         MessageBoxImage image,
-        string title = "시간 외 사용 예약") =>
-        System.Windows.MessageBox.Show(
-            this,
-            message,
-            title,
-            MessageBoxButton.OK,
-            image);
+        string title = "시간 외 사용 예약")
+    {
+        var dialog = new SettingsMessageDialog(title, message);
+        if (image == MessageBoxImage.Error)
+        {
+            dialog.MessageText.Foreground = (System.Windows.Media.Brush)FindResource("Zara.Brush.Danger");
+        }
+
+        ShowSettingsDialog(dialog);
+    }
+
+    private bool? ShowSettingsDialog(Window dialog)
+    {
+        dialog.Owner = this;
+        DialogDimmer.Visibility = Visibility.Visible;
+        try
+        {
+            return dialog.ShowDialog();
+        }
+        finally
+        {
+            DialogDimmer.Visibility = Visibility.Collapsed;
+        }
+    }
 }

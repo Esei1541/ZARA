@@ -26,12 +26,8 @@ public partial class ReservationEditorDialog : Window
                 out string validationMessage) ||
             draft is null)
         {
-            System.Windows.MessageBox.Show(
-                this,
-                validationMessage,
-                "시간 외 사용 예약",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+            ValidationMessage.Text = validationMessage;
+            ValidationMessage.Visibility = Visibility.Visible;
             return;
         }
 

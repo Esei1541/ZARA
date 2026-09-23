@@ -49,8 +49,8 @@ public sealed class LockReminderSettingsBindingTests
             Dictionary<string, CheckBox> reminderCheckBoxes = GetReminderCheckBoxes(window);
 
             CheckBox restartCheckBox = FindVisualDescendants<CheckBox>(window)
-                .Single(checkBox => Equals(checkBox.Content,
-                    "자동 재실행"));
+                .Single(checkBox => System.Windows.Automation.AutomationProperties.GetName(checkBox) ==
+                    "프로그램 자동 재실행");
             Binding restartValue = BindingOperations.GetBinding(
                 restartCheckBox, ToggleButton.IsCheckedProperty)!;
             Binding restartEnabled = BindingOperations.GetBinding(
@@ -85,8 +85,7 @@ public sealed class LockReminderSettingsBindingTests
             Assert.IsTrue(reminderCheckBoxes["10분 전"].IsChecked);
             Assert.IsFalse(reminderCheckBoxes["5분 전"].IsChecked);
             Assert.IsTrue(reminderCheckBoxes["1분 전"].IsChecked);
-            var reminderRow = (StackPanel)reminderCheckBoxes["30분 전"].Parent;
-            Assert.AreEqual(Orientation.Horizontal, reminderRow.Orientation);
+            var reminderRow = (Panel)reminderCheckBoxes["30분 전"].Parent;
             CollectionAssert.AreEqual(
                 ExpectedBindings.Select(binding => binding.Content).ToArray(),
                 reminderRow.Children.OfType<CheckBox>().Select(checkBox => (string)checkBox.Content).ToArray());

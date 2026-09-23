@@ -6,15 +6,21 @@
         Title="ZARA" Width="980" Height="780" MinWidth="820" MinHeight="620"
         Icon="Assets/ZaraIcon.png" WindowStartupLocation="CenterScreen"
         Background="{DynamicResource Zara.Brush.Background}" Foreground="{DynamicResource Zara.Brush.Text}"
-        FontFamily="{DynamicResource Zara.Font.Family}" FontSize="14" UseLayoutRounding="True">
+        FontFamily="{DynamicResource Zara.Font.Family}" FontSize="14" UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
   <Window.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Styles/SettingsStyles.xaml" /></ResourceDictionary.MergedDictionaries>
       <BooleanToVisibilityConverter x:Key="BooleanVisibility" />
       <Style TargetType="TabItem" BasedOn="{StaticResource Zara.TabItem}" />
       <Style x:Key="ReservationCell" TargetType="TextBlock">
-        <Setter Property="VerticalAlignment" Value="Center" /><Setter Property="Margin" Value="8,12" />
+        <Setter Property="VerticalAlignment" Value="Center" /><Setter Property="Margin" Value="12,19" />
         <Setter Property="TextWrapping" Value="Wrap" /><Setter Property="FontSize" Value="12" />
+        <Setter Property="LineHeight" Value="18" /><Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
+      </Style>
+      <Style x:Key="FieldLabel" TargetType="TextBlock">
+        <Setter Property="FontWeight" Value="SemiBold" /><Setter Property="Margin" Value="0,0,0,10" />
+        <Setter Property="LineHeight" Value="21" /><Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
       </Style>
     </ResourceDictionary>
   </Window.Resources>
@@ -22,18 +28,18 @@
     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
     <Grid Background="{StaticResource Zara.Brush.Surface}">
       <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-      <TextBlock Text="ZARA" FontSize="26" FontWeight="SemiBold" Margin="26,24" VerticalAlignment="Center" />
-      <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,22,26,16">
+      <TextBlock Text="ZARA" FontSize="26" LineHeight="39" FontWeight="SemiBold" Margin="26,22" VerticalAlignment="Center" />
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="0,22,26,22">
         <StackPanel MaxWidth="270" VerticalAlignment="Center">
           <TextBlock Text="{Binding HeaderLockLabel}" Style="{StaticResource Zara.SecondaryText}" HorizontalAlignment="Right" />
-          <TextBlock x:Name="LockCountdownText" Text="{Binding HeaderLockValue}" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Right" Margin="0,3" />
+          <TextBlock x:Name="LockCountdownText" Text="{Binding HeaderLockValue}" FontSize="25" LineHeight="31.25" FontWeight="SemiBold" HorizontalAlignment="Right" Margin="0,3" />
           <TextBlock Text="{Binding HeaderLockDetail}" Style="{StaticResource Zara.SecondaryText}" TextWrapping="Wrap" TextAlignment="Right" />
         </StackPanel>
         <Border BorderBrush="{StaticResource Zara.Brush.Border}" BorderThickness="1,0,0,0" Padding="24,0,0,0" Margin="24,0,0,0"
                 Visibility="{Binding IsEmergencyQuotaVisible, Converter={StaticResource BooleanVisibility}}">
           <StackPanel>
             <TextBlock Text="남은 긴급 해제" Style="{StaticResource Zara.SecondaryText}" HorizontalAlignment="Right" />
-            <TextBlock x:Name="EmergencyQuotaText" Text="{Binding HeaderEmergencyRemaining}" FontSize="24" FontWeight="SemiBold" HorizontalAlignment="Right" Margin="0,3" />
+            <TextBlock x:Name="EmergencyQuotaText" Text="{Binding HeaderEmergencyRemaining}" FontSize="25" LineHeight="31.25" FontWeight="SemiBold" HorizontalAlignment="Right" Margin="0,3" />
             <TextBlock x:Name="EmergencyResetText" Text="{Binding HeaderEmergencyReset}" Style="{StaticResource Zara.SecondaryText}" HorizontalAlignment="Right" />
           </StackPanel>
         </Border>
@@ -44,15 +50,22 @@
         <Grid>
           <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <StackPanel Margin="22">
-              <TextBlock Text="실행 설정" Style="{StaticResource Zara.SectionTitle}" Margin="0,0,0,18" />
-              <Border Style="{StaticResource Zara.Panel}">
+            <Grid Margin="22" MinHeight="436">
+              <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+              <TextBlock Text="기본 설정" Style="{StaticResource Zara.SectionTitle}" Margin="0,0,0,18" />
+              <Border Grid.Row="1" Style="{StaticResource Zara.Panel}">
                 <StackPanel>
-                  <CheckBox Content="자동 재실행" Style="{StaticResource Zara.Switch}"
-                            IsChecked="{Binding RestartOnExitWhenUnlocked, Mode=TwoWay}" IsEnabled="{Binding CanEditExecutionSettings}" />
-                  <TextBlock Text="오류 등으로 예기치 않게 프로그램이 종료될 경우 자동으로 다시 실행합니다."
-                             Style="{StaticResource Zara.SecondaryText}" TextWrapping="Wrap" Margin="0,7,0,0" />
-                  <Border BorderBrush="{StaticResource Zara.Brush.Border}" BorderThickness="0,1,0,0" Margin="0,16,0,0" Padding="0,14,0,0">
+                  <TextBlock Text="실행 설정" Style="{StaticResource Zara.Heading}" Margin="0,0,0,18" />
+                  <CheckBox Style="{StaticResource Zara.Switch}" HorizontalContentAlignment="Stretch"
+                            IsChecked="{Binding RestartOnExitWhenUnlocked, Mode=TwoWay}" IsEnabled="{Binding CanEditExecutionSettings}"
+                            AutomationProperties.Name="프로그램 자동 재실행">
+                    <StackPanel>
+                      <TextBlock Text="프로그램 자동 재실행" FontWeight="SemiBold" />
+                      <TextBlock Text="오류 등으로 예기치 않게 프로그램이 종료될 경우 자동으로 다시 실행합니다."
+                                 Style="{StaticResource Zara.SecondaryText}" TextWrapping="Wrap" Margin="0,5,0,0" />
+                    </StackPanel>
+                  </CheckBox>
+                  <Border BorderBrush="{StaticResource Zara.Brush.Border}" BorderThickness="0,1,0,0" Margin="0,18,0,0" Padding="0,18,0,0">
                     <TextBlock Style="{StaticResource Zara.SecondaryText}" TextWrapping="Wrap">
                       <Run Text="사용 금지 시간에는 설정 여부와 관계 없이 다시 실행됩니다." /><LineBreak />
                       <Run Text="시스템 트레이에서 직접 종료할 경우에는 다시 실행하지 않습니다." />
@@ -60,21 +73,22 @@
                   </Border>
                 </StackPanel>
               </Border>
-              <Border Style="{StaticResource Zara.Panel}" Margin="0,16,0,0">
+              <Border Grid.Row="2" Style="{StaticResource Zara.Panel}" Margin="0,18,0,0">
                 <StackPanel>
                   <TextBlock Text="잠금 전 음성 안내" Style="{StaticResource Zara.Heading}" />
-                  <TextBlock Text="잠금 시각이 다가오면 음성 안내를 출력합니다." Style="{StaticResource Zara.SecondaryText}" Margin="0,6,0,0" />
-                  <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                    <CheckBox Content="30분 전" Style="{StaticResource Zara.OptionCheckBox}" Margin="0,0,12,0" IsChecked="{Binding VoiceReminder30Minutes, Mode=TwoWay}" IsEnabled="{Binding CanEditExecutionSettings}" />
-                    <CheckBox Content="10분 전" Style="{StaticResource Zara.OptionCheckBox}" Margin="0,0,12,0" IsChecked="{Binding VoiceReminder10Minutes, Mode=TwoWay}" IsEnabled="{Binding CanEditExecutionSettings}" />
-                    <CheckBox Content="5분 전" Style="{StaticResource Zara.OptionCheckBox}" Margin="0,0,12,0" IsChecked="{Binding VoiceReminder5Minutes, Mode=TwoWay}" IsEnabled="{Binding CanEditExecutionSettings}" />
-                    <CheckBox Content="1분 전" Style="{StaticResource Zara.OptionCheckBox}" IsChecked="{Binding VoiceReminder1Minute, Mode=TwoWay}" IsEnabled="{Binding CanEditExecutionSettings}" />
-                  </StackPanel>
+                  <TextBlock Text="잠금 시각이 다가오면 음성 안내를 출력합니다." Style="{StaticResource Zara.SecondaryText}" Margin="0,5,0,0" />
+                  <Grid Margin="0,18,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="10" /><ColumnDefinition Width="*" /><ColumnDefinition Width="10" /><ColumnDefinition Width="*" /><ColumnDefinition Width="10" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <CheckBox x:Name="Voice30Option" Content="30분 전" Style="{StaticResource Zara.OptionCheckBox}" IsChecked="{Binding VoiceReminder30Minutes, Mode=TwoWay}" IsEnabled="{Binding CanEditExecutionSettings}" />
+                    <CheckBox x:Name="Voice10Option" Grid.Column="2" Content="10분 전" Style="{StaticResource Zara.OptionCheckBox}" IsChecked="{Binding VoiceReminder10Minutes, Mode=TwoWay}" IsEnabled="{Binding CanEditExecutionSettings}" />
+                    <CheckBox x:Name="Voice5Option" Grid.Column="4" Content="5분 전" Style="{StaticResource Zara.OptionCheckBox}" IsChecked="{Binding VoiceReminder5Minutes, Mode=TwoWay}" IsEnabled="{Binding CanEditExecutionSettings}" />
+                    <CheckBox x:Name="Voice1Option" Grid.Column="6" Content="1분 전" Style="{StaticResource Zara.OptionCheckBox}" IsChecked="{Binding VoiceReminder1Minute, Mode=TwoWay}" IsEnabled="{Binding CanEditExecutionSettings}" />
+                  </Grid>
                 </StackPanel>
               </Border>
-              <TextBlock Text="사용 금지 시간에는 설정을 변경할 수 없습니다. (시간 외 사용 예약・긴급 해제 중에도 변경 불가)"
-                         Style="{StaticResource Zara.SecondaryText}" TextWrapping="Wrap" Margin="0,18,0,0" />
-            </StackPanel>
+              <TextBlock Grid.Row="4" Text="사용 금지 시간에는 설정을 변경할 수 없습니다. (시간 외 사용 예약・긴급 해제 중에도 변경 불가)"
+                         Style="{StaticResource Zara.SecondaryText}" TextWrapping="Wrap" Margin="2,18,2,0" />
+            </Grid>
           </ScrollViewer>
           <Border Grid.Row="1" Style="{StaticResource Zara.Footer}">
             <WrapPanel x:Name="ShellActions" HorizontalAlignment="Right">
@@ -94,60 +108,58 @@
               <TextBlock Text="긴급 해제 설정" Style="{StaticResource Zara.SectionTitle}" Margin="0,0,0,18" />
               <Border Style="{StaticResource Zara.Panel}">
                 <StackPanel>
-                  <TextBlock Text="해제 조건" Style="{StaticResource Zara.Heading}" Margin="0,0,0,20" />
+                  <TextBlock Text="해제 조건" Style="{StaticResource Zara.Heading}" Margin="0,0,0,18" />
                   <Grid>
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                    <TextBlock Text="해제 유지 시간" VerticalAlignment="Top" Margin="0,8,0,0" />
-                    <StackPanel Grid.Column="1">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="30" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                    <StackPanel x:Name="DurationField">
+                      <TextBlock Text="해제 유지 시간" Style="{StaticResource FieldLabel}" />
                       <StackPanel Orientation="Horizontal">
                         <Button Content="−" Command="{Binding DecreaseEmergencyDurationCommand}" Style="{StaticResource Zara.StepButton}" AutomationProperties.Name="유지 시간 1분 줄이기" />
-                        <TextBox Width="68" Margin="6,0" MaxLength="2" Style="{StaticResource Zara.TextBox}" Text="{Binding EmergencyDurationMinutesText, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="긴급 해제 유지 시간" behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True" InputScope="Number" />
+                        <TextBox Width="66" Padding="10,9" Margin="9,0" MaxLength="2" Style="{StaticResource Zara.TextBox}" Text="{Binding EmergencyDurationMinutesText, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="긴급 해제 유지 시간" behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True" InputScope="Number" />
+                        <TextBlock Text="분" VerticalAlignment="Center" Margin="0,0,9,0" />
                         <Button Content="+" Command="{Binding IncreaseEmergencyDurationCommand}" Style="{StaticResource Zara.StepButton}" AutomationProperties.Name="유지 시간 1분 늘리기" />
-                        <TextBlock Text="분" VerticalAlignment="Center" Margin="10,0,0,0" />
                       </StackPanel>
-                      <TextBlock Text="1~60분" Style="{StaticResource Zara.SecondaryText}" Margin="0,7,0,0" />
+                      <TextBlock Text="1~60분" Style="{StaticResource Zara.SecondaryText}" Margin="0,8,0,0" />
                     </StackPanel>
-                    <TextBlock Grid.Row="2" Text="입력할 문장 수" VerticalAlignment="Top" Margin="0,8,0,0" />
-                    <StackPanel Grid.Row="2" Grid.Column="1">
+                    <StackPanel x:Name="SentenceField" Grid.Column="2">
+                      <TextBlock Text="입력할 문장 수" Style="{StaticResource FieldLabel}" />
                       <StackPanel Orientation="Horizontal">
                         <Button Content="−" Command="{Binding DecreaseEmergencySentenceCountCommand}" Style="{StaticResource Zara.StepButton}" AutomationProperties.Name="문장 수 1개 줄이기" />
-                        <TextBox Width="68" Margin="6,0" MaxLength="2" Style="{StaticResource Zara.TextBox}" Text="{Binding EmergencySentenceCountText, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="긴급 해제 문장 수" behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True" InputScope="Number" />
+                        <TextBox Width="66" Padding="10,9" Margin="9,0" MaxLength="2" Style="{StaticResource Zara.TextBox}" Text="{Binding EmergencySentenceCountText, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="긴급 해제 문장 수" behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True" InputScope="Number" />
+                        <TextBlock Text="개" VerticalAlignment="Center" Margin="0,0,9,0" />
                         <Button Content="+" Command="{Binding IncreaseEmergencySentenceCountCommand}" Style="{StaticResource Zara.StepButton}" AutomationProperties.Name="문장 수 1개 늘리기" />
-                        <TextBlock Text="개" VerticalAlignment="Center" Margin="10,0,0,0" />
                       </StackPanel>
-                      <TextBlock Text="0~99개 · 0개면 문장 입력 없이 해제" Style="{StaticResource Zara.SecondaryText}" Margin="0,7,0,0" TextWrapping="Wrap" />
+                      <TextBlock Text="0~99개 · 0개면 문장 입력 없이 해제" Style="{StaticResource Zara.SecondaryText}" Margin="0,8,0,0" TextWrapping="Wrap" />
                     </StackPanel>
                   </Grid>
                 </StackPanel>
               </Border>
-              <Border Style="{StaticResource Zara.Panel}" Margin="0,16,0,0">
+              <Border Style="{StaticResource Zara.Panel}" Margin="0,18,0,0">
                 <StackPanel>
-                  <CheckBox Content="긴급 해제 횟수 제한" Style="{StaticResource Zara.Switch}" IsChecked="{Binding EmergencyWeeklyLimitEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                  <Grid Margin="0,20,0,0" IsEnabled="{Binding EmergencyWeeklyLimitEnabled}">
-                    <Grid.ColumnDefinitions><ColumnDefinition Width="180" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="20" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
-                    <TextBlock Text="주간 최대 횟수" Margin="0,8,0,0" />
-                    <StackPanel Grid.Column="1">
+                  <CheckBox Content="긴급 해제 횟수 제한" FontWeight="SemiBold" Style="{StaticResource Zara.Switch}" IsChecked="{Binding EmergencyWeeklyLimitEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                  <Grid Margin="0,18,0,0" IsEnabled="{Binding EmergencyWeeklyLimitEnabled}">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="0.7*" MinWidth="200" /><ColumnDefinition Width="26" /><ColumnDefinition Width="1.3*" MinWidth="280" /></Grid.ColumnDefinitions>
+                    <StackPanel x:Name="MaximumField">
+                      <TextBlock Text="주간 최대 횟수" Style="{StaticResource FieldLabel}" />
                       <StackPanel Orientation="Horizontal">
                         <Button Content="−" Command="{Binding DecreaseEmergencyMaximumCommand}" Style="{StaticResource Zara.StepButton}" AutomationProperties.Name="주간 최대 횟수 1회 줄이기" />
-                        <TextBox Width="68" Margin="6,0" MaxLength="2" Style="{StaticResource Zara.TextBox}" Text="{Binding EmergencyWeeklyMaximumCountText, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="주간 최대 횟수" behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True" InputScope="Number" />
+                        <TextBox Width="66" Padding="10,9" Margin="9,0" MaxLength="2" Style="{StaticResource Zara.TextBox}" Text="{Binding EmergencyWeeklyMaximumCountText, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="주간 최대 횟수" behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True" InputScope="Number" />
+                        <TextBlock Text="회" VerticalAlignment="Center" Margin="0,0,9,0" />
                         <Button Content="+" Command="{Binding IncreaseEmergencyMaximumCommand}" Style="{StaticResource Zara.StepButton}" AutomationProperties.Name="주간 최대 횟수 1회 늘리기" />
-                        <TextBlock Text="회" VerticalAlignment="Center" Margin="10,0,0,0" />
                       </StackPanel>
-                      <TextBlock Text="1~99회" Style="{StaticResource Zara.SecondaryText}" Margin="0,7,0,0" />
+                      <TextBlock Text="1~99회" Style="{StaticResource Zara.SecondaryText}" Margin="0,8,0,0" />
                     </StackPanel>
-                    <TextBlock Grid.Row="2" Text="초기화 요일" Margin="0,8,0,0" />
-                    <StackPanel Grid.Row="2" Grid.Column="1">
+                    <StackPanel x:Name="ResetDayField" Grid.Column="2">
+                      <TextBlock Text="초기화 요일" Style="{StaticResource FieldLabel}" />
                       <ListBox x:Name="ResetDayList" ItemsSource="{Binding EmergencyWeeklyResetDays}" SelectedValuePath="Key"
                                SelectedValue="{Binding EmergencyWeeklyResetDay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                               BorderThickness="0" Background="Transparent" AutomationProperties.Name="초기화 요일"
+                               BorderThickness="0" Padding="0" Background="Transparent" AutomationProperties.Name="초기화 요일"
                                ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled">
                         <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ListBox.ItemsPanel>
-                        <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource Zara.DayItem}"><Setter Property="Padding" Value="9,8" /><Setter Property="Margin" Value="0,0,5,5" /><Setter Property="AutomationProperties.Name" Value="{Binding Value}" /></Style></ListBox.ItemContainerStyle>
-                        <ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Value}" FontSize="12" /></DataTemplate></ListBox.ItemTemplate>
+                        <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem" BasedOn="{StaticResource Zara.DayItem}"><Setter Property="Padding" Value="10,8" /><Setter Property="Margin" Value="0,0,5,0" /><Setter Property="AutomationProperties.Name" Value="{Binding Value}" /></Style></ListBox.ItemContainerStyle>
+                        <ListBox.ItemTemplate><DataTemplate><TextBlock Text="{Binding Value[0]}" FontSize="14" /></DataTemplate></ListBox.ItemTemplate>
                       </ListBox>
-                      <TextBlock Text="선택한 요일 자정에 사용 횟수가 초기화됩니다." Style="{StaticResource Zara.SecondaryText}" TextWrapping="Wrap" Margin="0,7,0,0" />
+                      <TextBlock Text="선택한 요일 자정에 사용 횟수가 초기화됩니다." Style="{StaticResource Zara.SecondaryText}" TextWrapping="Wrap" Margin="0,5,0,0" />
                     </StackPanel>
                   </Grid>
                 </StackPanel>
@@ -164,29 +176,42 @@
             <Button DockPanel.Dock="Right" Content="+ 예약 추가" Click="AddReservation_Click" IsEnabled="{Binding CanChangeUsagePolicySettings}" Style="{StaticResource Zara.PrimaryButton}" />
             <TextBlock Text="시간 외 사용 예약" Style="{StaticResource Zara.SectionTitle}" VerticalAlignment="Center" />
           </DockPanel>
-          <Border Grid.Row="2" Style="{StaticResource Zara.Panel}" Padding="12" VerticalAlignment="Top">
-            <DataGrid x:Name="ReservationGrid" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" CanUserReorderColumns="True"
+          <Border Grid.Row="2" Style="{StaticResource Zara.Panel}" VerticalAlignment="Top">
+            <Grid>
+              <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+            <DataGrid x:Name="ReservationGrid" SizeChanged="ReservationGrid_SizeChanged" AutoGenerateColumns="False" CanUserAddRows="False" CanUserDeleteRows="False" CanUserReorderColumns="True"
                       CanUserResizeRows="False" CanUserSortColumns="True" HeadersVisibility="Column" IsReadOnly="True" ItemsSource="{Binding ReservationsView}"
                       Background="{StaticResource Zara.Brush.Surface}" BorderThickness="0" RowBackground="{StaticResource Zara.Brush.Surface}"
-                      HorizontalGridLinesBrush="{StaticResource Zara.Brush.Border}" GridLinesVisibility="Horizontal" RowHeaderWidth="0" MinHeight="100">
+                      Foreground="{StaticResource Zara.Brush.Text}" FontWeight="Normal"
+                      HorizontalGridLinesBrush="{StaticResource Zara.Brush.Border}" GridLinesVisibility="None" RowHeaderWidth="0">
               <DataGrid.Resources>
                 <Style TargetType="DataGridColumnHeader">
                   <Setter Property="Background" Value="{StaticResource Zara.Brush.Surface}" /><Setter Property="Foreground" Value="{StaticResource Zara.Brush.Muted}" />
                   <Setter Property="BorderBrush" Value="{StaticResource Zara.Brush.Border}" /><Setter Property="BorderThickness" Value="0,0,0,1" />
-                  <Setter Property="Padding" Value="8,12" /><Setter Property="FontSize" Value="12" />
+                  <Setter Property="Padding" Value="12,0,12,11" /><Setter Property="FontSize" Value="12" /><Setter Property="FontWeight" Value="Normal" />
                 </Style>
-                <Style TargetType="DataGridCell"><Setter Property="BorderThickness" Value="0" /><Setter Property="Padding" Value="0" /></Style>
+                <Style TargetType="DataGridCell"><Setter Property="BorderThickness" Value="0" /><Setter Property="Padding" Value="0" /><Setter Property="Background" Value="Transparent" /><Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" /></Style>
+                <Style TargetType="DataGridRow"><Setter Property="Background" Value="Transparent" /><Setter Property="BorderThickness" Value="0,1,0,0" /><Setter Property="BorderBrush" Value="{StaticResource Zara.Brush.Border}" /></Style>
               </DataGrid.Resources>
               <DataGrid.Columns>
-                <DataGridTemplateColumn Width="145" Header="날짜" SortMemberPath="Date">
-                  <DataGridTemplateColumn.CellTemplate><DataTemplate><StackPanel Margin="8,12"><TextBlock Text="{Binding Date, StringFormat={}{0:yyyy.MM.dd}}" FontWeight="SemiBold" /><TextBlock Text="{Binding WeekdayText}" Style="{StaticResource Zara.SecondaryText}" Margin="0,3,0,0" /></StackPanel></DataTemplate></DataGridTemplateColumn.CellTemplate>
+                <DataGridTemplateColumn x:Name="ReservationDateColumn" Width="22*" Header="날짜" SortMemberPath="Date">
+                  <DataGridTemplateColumn.HeaderStyle><Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}"><Setter Property="Padding" Value="0,0,12,11" /></Style></DataGridTemplateColumn.HeaderStyle>
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate><StackPanel Margin="0,19,12,19"><TextBlock Text="{Binding Date, StringFormat={}{0:yyyy.MM.dd}}" FontWeight="SemiBold" /><TextBlock Text="{Binding WeekdayText}" Style="{StaticResource Zara.SecondaryText}" /></StackPanel></DataTemplate></DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Width="150" Binding="{Binding TimeRange}" Header="사용 시간" SortMemberPath="StartTime" ElementStyle="{StaticResource ReservationCell}" />
-                <DataGridTextColumn Width="*" MinWidth="90" Binding="{Binding Memo}" Header="메모" SortMemberPath="Memo" ElementStyle="{StaticResource ReservationCell}" />
-                <DataGridTextColumn Width="80" Binding="{Binding ActiveStatusText}" Header="상태" SortMemberPath="IsActive" ElementStyle="{StaticResource ReservationCell}" />
-                <DataGridTemplateColumn Width="60" Header="관리">
+                <DataGridTextColumn x:Name="ReservationTimeColumn" Width="22*" Binding="{Binding TimeRange}" Header="사용 시간" SortMemberPath="StartTime" ElementStyle="{StaticResource ReservationCell}" />
+                <DataGridTextColumn Width="35*" MinWidth="90" Binding="{Binding Memo}" Header="메모" SortMemberPath="Memo" ElementStyle="{StaticResource ReservationCell}" />
+                <DataGridTemplateColumn x:Name="ReservationStateColumn" Width="13*" Header="상태" SortMemberPath="IsActive">
                   <DataGridTemplateColumn.CellTemplate><DataTemplate>
-                    <Button Click="DeleteReservation_Click" Style="{StaticResource Zara.Button}" Width="34" Height="34" Padding="0" VerticalAlignment="Center"
+                    <Border Padding="8,3" CornerRadius="5" Margin="12,0" VerticalAlignment="Center" HorizontalAlignment="Left">
+                      <Border.Style><Style TargetType="Border"><Setter Property="Background" Value="{StaticResource Zara.Brush.Wash}" /><Style.Triggers><DataTrigger Binding="{Binding IsActive}" Value="True"><Setter Property="Background" Value="{StaticResource Zara.Brush.AccentSoft}" /></DataTrigger></Style.Triggers></Style></Border.Style>
+                      <TextBlock Text="{Binding ActiveStatusText}"><TextBlock.Style><Style TargetType="TextBlock" BasedOn="{StaticResource Zara.SecondaryText}"><Style.Triggers><DataTrigger Binding="{Binding IsActive}" Value="True"><Setter Property="Foreground" Value="{StaticResource Zara.Brush.Accent}" /></DataTrigger></Style.Triggers></Style></TextBlock.Style></TextBlock>
+                    </Border>
+                  </DataTemplate></DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Width="72" Header="관리">
+                  <DataGridTemplateColumn.HeaderStyle><Style TargetType="DataGridColumnHeader" BasedOn="{StaticResource {x:Type DataGridColumnHeader}}"><Setter Property="HorizontalContentAlignment" Value="Right" /><Setter Property="Padding" Value="12,0,0,11" /></Style></DataGridTemplateColumn.HeaderStyle>
+                  <DataGridTemplateColumn.CellTemplate><DataTemplate>
+                    <Button Click="DeleteReservation_Click" Style="{StaticResource Zara.Button}" Width="34" Height="34" Padding="0" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="{StaticResource Zara.Brush.Muted}"
                             AutomationProperties.Name="예약 삭제" ToolTip="예약 삭제" Background="Transparent" BorderThickness="0">
                       <TextBlock Text="&#xE74D;" FontFamily="Segoe MDL2 Assets" FontSize="16" />
                     </Button>
@@ -194,9 +219,14 @@
                 </DataGridTemplateColumn>
               </DataGrid.Columns>
             </DataGrid>
+              <TextBlock Grid.Row="1" Text="등록된 예약이 없습니다." Padding="16,65" HorizontalAlignment="Center" Foreground="{StaticResource Zara.Brush.Muted}">
+                <TextBlock.Style><Style TargetType="TextBlock"><Setter Property="Visibility" Value="Collapsed" /><Style.Triggers><DataTrigger Binding="{Binding Reservations.Count}" Value="0"><Setter Property="Visibility" Value="Visible" /></DataTrigger></Style.Triggers></Style></TextBlock.Style>
+              </TextBlock>
+            </Grid>
           </Border>
         </Grid>
       </TabItem>
     </TabControl>
+    <Border x:Name="DialogDimmer" Grid.RowSpan="2" Background="#5518202C" Visibility="Collapsed" />
   </Grid>
 </Window>

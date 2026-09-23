@@ -8,13 +8,19 @@
   <SolidColorBrush x:Key="Zara.Brush.Accent" Color="#365BC5" />
   <SolidColorBrush x:Key="Zara.Brush.AccentSoft" Color="#EDF2FF" />
   <SolidColorBrush x:Key="Zara.Brush.Danger" Color="#B02727" />
+  <SolidColorBrush x:Key="Zara.Brush.Wash" Color="#F0F2F6" />
 
   <CornerRadius x:Key="Zara.Radius.Control">7</CornerRadius>
   <CornerRadius x:Key="Zara.Radius.Input">6</CornerRadius>
   <CornerRadius x:Key="Zara.Radius.Panel">10</CornerRadius>
-  <Thickness x:Key="Zara.Padding.Control">12,8</Thickness>
-  <Thickness x:Key="Zara.Padding.Panel">18</Thickness>
+  <Thickness x:Key="Zara.Padding.Control">13,8</Thickness>
+  <Thickness x:Key="Zara.Padding.Panel">20</Thickness>
   <FontFamily x:Key="Zara.Font.Family">Segoe UI, Malgun Gothic</FontFamily>
+
+  <Style TargetType="TextBlock">
+    <Setter Property="LineHeight" Value="21" />
+    <Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
+  </Style>
 
   <Style x:Key="Zara.Button" TargetType="Button">
     <Setter Property="Background" Value="{StaticResource Zara.Brush.Surface}" />
@@ -66,6 +72,13 @@
     <Setter Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
     <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Surface}" />
     <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style x:Key="Zara.DialogCloseButton" TargetType="Button" BasedOn="{StaticResource Zara.Button}">
+    <Setter Property="Background" Value="Transparent" /><Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Muted}" /><Setter Property="FontSize" Value="22" />
+    <Setter Property="Padding" Value="8,3" />
+    <Setter Property="ContentTemplate"><Setter.Value><DataTemplate><TextBlock Text="{Binding}" FontSize="22" LineHeight="33" /></DataTemplate></Setter.Value></Setter>
   </Style>
 
   <Style x:Key="Zara.TimeButton" TargetType="ToggleButton">
@@ -124,7 +137,7 @@
     <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
     <Setter Property="FontSize" Value="14" />
     <Setter Property="Padding" Value="8" />
-    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="MinHeight" Value="39" />
     <Setter Property="HorizontalContentAlignment" Value="Center" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
     <Setter Property="TextAlignment" Value="Center" />
@@ -137,9 +150,7 @@
                   BorderThickness="{TemplateBinding BorderThickness}"
                   CornerRadius="{StaticResource Zara.Radius.Input}"
                   SnapsToDevicePixels="True">
-            <ScrollViewer x:Name="PART_ContentHost"
-                          Margin="{TemplateBinding Padding}"
-                          Focusable="False" />
+            <ScrollViewer x:Name="PART_ContentHost" Focusable="False" />
           </Border>
           <ControlTemplate.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
@@ -158,18 +169,73 @@
     </Setter>
   </Style>
 
+  <Style x:Key="Zara.DatePicker" TargetType="DatePicker">
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
+    <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="SelectedDateFormat" Value="Short" />
+    <Setter Property="MinHeight" Value="41" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="DatePicker">
+          <Border x:Name="Chrome" Background="{StaticResource Zara.Brush.Background}" BorderBrush="{StaticResource Zara.Brush.Border}"
+                  BorderThickness="1" CornerRadius="6" Padding="10,9">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <DatePickerTextBox x:Name="PART_TextBox" BorderThickness="0" Background="Transparent"
+                                 Foreground="{TemplateBinding Foreground}" FontFamily="{TemplateBinding FontFamily}" FontSize="{TemplateBinding FontSize}"
+                                 VerticalContentAlignment="Center" Padding="0">
+                <DatePickerTextBox.Template><ControlTemplate TargetType="DatePickerTextBox"><ScrollViewer x:Name="PART_ContentHost" Focusable="False" /></ControlTemplate></DatePickerTextBox.Template>
+              </DatePickerTextBox>
+              <Button x:Name="PART_Button" Grid.Column="1" Style="{StaticResource Zara.Button}" Padding="0" Width="20" Height="20" Margin="10,0,0,0"
+                      BorderThickness="0" Background="Transparent" Focusable="False" AutomationProperties.Name="달력 열기">
+                <Path Stroke="{StaticResource Zara.Brush.Muted}" StrokeThickness="1.3" Data="M 2,4 L 16,4 16,17 2,17 Z M 5,1 L 5,6 M 13,1 L 13,6 M 2,8 L 16,8" />
+              </Button>
+              <Popup x:Name="PART_Popup" Placement="Bottom" PlacementTarget="{Binding ElementName=PART_TextBox}" StaysOpen="False" AllowsTransparency="True" />
+            </Grid>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" /></Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.55" /></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <Style x:Key="Zara.CheckBox" TargetType="CheckBox">
     <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
     <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
     <Setter Property="FontSize" Value="14" />
     <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="CheckBox">
+          <StackPanel Orientation="Horizontal" Background="Transparent">
+            <Border x:Name="CheckBorder" Width="18" Height="18" CornerRadius="2" BorderThickness="1" BorderBrush="{StaticResource Zara.Brush.Muted}" VerticalAlignment="Center" Margin="0,0,7,0">
+              <Path x:Name="Mark" Data="M 3,7 L 6,10 L 12,3" Stroke="White" StrokeThickness="2" Visibility="Collapsed" />
+            </Border>
+            <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" />
+          </StackPanel>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="CheckBorder" Property="Background" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="CheckBorder" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="CheckBorder" Property="BorderBrush" Value="{StaticResource Zara.Brush.Text}" /><Setter TargetName="CheckBorder" Property="BorderThickness" Value="2" /></Trigger>
+            <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55" /></Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
   </Style>
 
   <Style x:Key="Zara.Switch" TargetType="CheckBox" BasedOn="{StaticResource Zara.CheckBox}">
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="CheckBox">
-          <Grid Background="Transparent" MinHeight="32">
+          <Grid Background="Transparent" MinHeight="22">
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <ContentPresenter VerticalAlignment="Center" Margin="0,0,16,0" RecognizesAccessKey="True" />
             <Border x:Name="Track" Grid.Column="1" Width="38" Height="22" CornerRadius="11"
@@ -191,23 +257,27 @@
   </Style>
 
   <Style x:Key="Zara.OptionCheckBox" TargetType="CheckBox" BasedOn="{StaticResource Zara.CheckBox}">
-    <Setter Property="Padding" Value="14,10" />
+    <Setter Property="Padding" Value="15" />
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="CheckBox">
-          <Border x:Name="Chrome" Background="{StaticResource Zara.Brush.Surface}" BorderBrush="{StaticResource Zara.Brush.Border}"
-                  BorderThickness="1" CornerRadius="{StaticResource Zara.Radius.Control}" Padding="{TemplateBinding Padding}">
-            <StackPanel Orientation="Horizontal">
+          <Border x:Name="Chrome" Background="{StaticResource Zara.Brush.Background}" BorderBrush="{StaticResource Zara.Brush.Border}"
+                  BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
               <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="True" />
-              <TextBlock x:Name="Mark" Text="&#xE739;" FontFamily="Segoe MDL2 Assets" Foreground="{StaticResource Zara.Brush.Muted}" Margin="22,0,0,0" VerticalAlignment="Center" />
-            </StackPanel>
+              <Border x:Name="CheckBorder" Grid.Column="1" Width="17" Height="17" Margin="12,0,0,0" CornerRadius="2" BorderThickness="1" BorderBrush="{StaticResource Zara.Brush.Muted}" VerticalAlignment="Center">
+                <Path x:Name="Mark" Data="M 3,7 L 6,10 L 12,3" Stroke="White" StrokeThickness="2" Visibility="Collapsed" />
+              </Border>
+            </Grid>
           </Border>
           <ControlTemplate.Triggers>
             <Trigger Property="IsChecked" Value="True">
               <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Zara.Brush.AccentSoft}" />
               <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
-              <Setter TargetName="Mark" Property="Text" Value="&#xE73A;" />
-              <Setter TargetName="Mark" Property="Foreground" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="CheckBorder" Property="Background" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="CheckBorder" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="Mark" Property="Visibility" Value="Visible" />
             </Trigger>
             <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderThickness" Value="2" /></Trigger>
             <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55" /></Trigger>
@@ -218,22 +288,22 @@
   </Style>
 
   <Style x:Key="Zara.TabItem" TargetType="TabItem">
-    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Muted}" />
-    <Setter Property="Padding" Value="0,15" />
+    <Setter Property="Padding" Value="0,11" />
     <Setter Property="Margin" Value="0,0,24,0" />
     <Setter Property="Template">
       <Setter.Value>
         <ControlTemplate TargetType="TabItem">
           <Border x:Name="Underline" Background="Transparent" BorderBrush="Transparent" BorderThickness="0,0,0,3">
-            <ContentPresenter ContentSource="Header" Margin="{TemplateBinding Padding}" RecognizesAccessKey="True" />
+            <ContentPresenter x:Name="HeaderPresenter" ContentSource="Header" Margin="{TemplateBinding Padding}" RecognizesAccessKey="True"
+                              TextElement.Foreground="{StaticResource Zara.Brush.Muted}" TextElement.FontWeight="Normal" />
           </Border>
           <ControlTemplate.Triggers>
             <Trigger Property="IsSelected" Value="True">
               <Setter TargetName="Underline" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
-              <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Accent}" />
-              <Setter Property="FontWeight" Value="SemiBold" />
+              <Setter TargetName="HeaderPresenter" Property="TextElement.Foreground" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="HeaderPresenter" Property="TextElement.FontWeight" Value="SemiBold" />
             </Trigger>
-            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" /></Trigger>
+            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HeaderPresenter" Property="TextElement.Foreground" Value="{StaticResource Zara.Brush.Text}" /></Trigger>
             <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Underline" Property="Background" Value="{StaticResource Zara.Brush.AccentSoft}" /></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
@@ -247,8 +317,8 @@
         <ControlTemplate TargetType="TabControl">
           <Grid KeyboardNavigation.TabNavigation="Local">
             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-            <Border Background="{StaticResource Zara.Brush.Surface}" BorderBrush="{StaticResource Zara.Brush.Border}" BorderThickness="0,0,0,1" Padding="24,0">
-              <TabPanel IsItemsHost="True" KeyboardNavigation.TabIndex="1" />
+            <Border Background="{StaticResource Zara.Brush.Surface}" BorderBrush="{StaticResource Zara.Brush.Border}" BorderThickness="0,0,0,1" Padding="26,0">
+              <StackPanel Orientation="Horizontal" IsItemsHost="True" KeyboardNavigation.TabIndex="1" />
             </Border>
             <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Row="1" ContentSource="SelectedContent" />
           </Grid>
@@ -258,19 +328,20 @@
   </Style>
 
   <Style x:Key="Zara.StepButton" TargetType="Button" BasedOn="{StaticResource Zara.Button}">
-    <Setter Property="Width" Value="36" /><Setter Property="Height" Value="36" /><Setter Property="Padding" Value="0" />
+    <Setter Property="Width" Value="34" /><Setter Property="Height" Value="36" /><Setter Property="Padding" Value="0" />
     <Setter Property="FontSize" Value="18" />
   </Style>
 
   <Style x:Key="Zara.SectionTitle" TargetType="TextBlock">
     <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
     <Setter Property="FontSize" Value="18" /><Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="LineHeight" Value="27" /><Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
   </Style>
 
   <Style x:Key="Zara.Footer" TargetType="Border">
     <Setter Property="Background" Value="{StaticResource Zara.Brush.Surface}" />
     <Setter Property="BorderBrush" Value="{StaticResource Zara.Brush.Border}" /><Setter Property="BorderThickness" Value="0,1,0,0" />
-    <Setter Property="Padding" Value="22,14" />
+    <Setter Property="Padding" Value="22,15" />
   </Style>
 
   <Style x:Key="Zara.Panel" TargetType="Border">
@@ -413,7 +484,8 @@
   <Style x:Key="Zara.Heading" TargetType="TextBlock">
     <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
     <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
-    <Setter Property="FontSize" Value="16" />
+    <Setter Property="FontSize" Value="15" />
+    <Setter Property="LineHeight" Value="22.5" /><Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
 
@@ -421,12 +493,15 @@
     <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Muted}" />
     <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
     <Setter Property="FontSize" Value="12" />
+    <Setter Property="LineHeight" Value="18" /><Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
   </Style>
 
   <Style x:Key="Zara.TimeText" TargetType="TextBlock">
     <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
     <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
     <Setter Property="FontSize" Value="26" />
+    <Setter Property="LineHeight" Value="39" /><Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
+    <Setter Property="Margin" Value="0,2,0,0" />
     <Setter Property="FontWeight" Value="SemiBold" />
   </Style>
 
@@ -434,6 +509,11 @@
     <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Danger}" />
     <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
     <Setter Property="FontSize" Value="12" />
+    <Setter Property="LineHeight" Value="18" /><Setter Property="LineStackingStrategy" Value="BlockLineHeight" />
     <Setter Property="TextWrapping" Value="Wrap" />
+    <Style.Triggers>
+      <Trigger Property="Text" Value=""><Setter Property="Visibility" Value="Collapsed" /></Trigger>
+      <Trigger Property="Text" Value="{x:Null}"><Setter Property="Visibility" Value="Collapsed" /></Trigger>
+    </Style.Triggers>
   </Style>
 </ResourceDictionary>

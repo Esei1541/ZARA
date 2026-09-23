@@ -3,12 +3,14 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:behaviors="clr-namespace:Zara.Desktop.Behaviors"
         Title="예약 추가"
-        Width="540"
-        MinWidth="480"
+        Width="510"
         SizeToContent="Height"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
-        Background="#FFF5F6F8">
+        WindowStyle="None"
+        AllowsTransparency="True"
+        ShowInTaskbar="False"
+        Background="Transparent" Language="ko-KR" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
   <Window.Resources>
     <ResourceDictionary>
       <ResourceDictionary.MergedDictionaries>
@@ -20,12 +22,23 @@
   <Grid TextElement.Foreground="{StaticResource Zara.Brush.Text}"
         TextElement.FontFamily="{StaticResource Zara.Font.Family}"
         TextElement.FontSize="14">
-    <Border Style="{StaticResource Zara.Panel}" Margin="20" Padding="24">
+    <Border x:Name="DialogPanel"
+            Background="{StaticResource Zara.Brush.Surface}"
+            BorderBrush="{StaticResource Zara.Brush.Border}"
+            BorderThickness="1"
+            CornerRadius="12"
+            Padding="24">
       <StackPanel>
-        <TextBlock Text="예약 추가" Style="{StaticResource Zara.Heading}" FontSize="20" Margin="0,0,0,22" />
+        <Grid Margin="0,0,0,22">
+          <TextBlock Text="예약 추가" Style="{StaticResource Zara.SectionTitle}" VerticalAlignment="Center" />
+          <Button HorizontalAlignment="Right" Style="{StaticResource Zara.DialogCloseButton}"
+                  IsCancel="True" Content="×" AutomationProperties.Name="닫기" />
+        </Grid>
 
         <TextBlock Text="날짜" FontWeight="SemiBold" Margin="0,0,0,8" />
-        <DatePicker Height="36"
+        <DatePicker x:Name="ReservationDatePicker"
+                    Style="{StaticResource Zara.DatePicker}"
+                    HorizontalAlignment="Stretch"
                     AutomationProperties.Name="예약 날짜"
                     SelectedDate="{Binding SelectedDate}" />
 
@@ -36,7 +49,7 @@
             <ColumnDefinition Width="*" />
           </Grid.ColumnDefinitions>
 
-          <Border Grid.Column="0"
+          <Border x:Name="StartTimeCard" Grid.Column="0"
                   Background="{StaticResource Zara.Brush.Background}"
                   BorderBrush="{StaticResource Zara.Brush.Border}"
                   BorderThickness="1"
@@ -48,6 +61,7 @@
                 <TextBox Width="55"
                          MaxLength="2"
                          FontSize="21"
+                         Padding="5"
                          Style="{StaticResource Zara.TextBox}"
                          AutomationProperties.HelpText="0부터 23까지 입력"
                          AutomationProperties.Name="시작 시각 시간"
@@ -58,6 +72,7 @@
                 <TextBox Width="55"
                          MaxLength="2"
                          FontSize="21"
+                         Padding="5"
                          Style="{StaticResource Zara.TextBox}"
                          AutomationProperties.HelpText="0부터 59까지 입력"
                          AutomationProperties.Name="시작 시각 분"
@@ -68,7 +83,7 @@
             </StackPanel>
           </Border>
 
-          <Border Grid.Column="2"
+          <Border x:Name="EndTimeCard" Grid.Column="2"
                   Background="{StaticResource Zara.Brush.Background}"
                   BorderBrush="{StaticResource Zara.Brush.Border}"
                   BorderThickness="1"
@@ -80,6 +95,7 @@
                 <TextBox Width="55"
                          MaxLength="2"
                          FontSize="21"
+                         Padding="5"
                          Style="{StaticResource Zara.TextBox}"
                          AutomationProperties.HelpText="0부터 23까지 입력"
                          AutomationProperties.Name="종료 시각 시간"
@@ -90,6 +106,7 @@
                 <TextBox Width="55"
                          MaxLength="2"
                          FontSize="21"
+                         Padding="5"
                          Style="{StaticResource Zara.TextBox}"
                          AutomationProperties.HelpText="0부터 59까지 입력"
                          AutomationProperties.Name="종료 시각 분"
@@ -118,9 +135,15 @@
                  VerticalScrollBarVisibility="Auto"
                  Text="{Binding Memo, UpdateSourceTrigger=PropertyChanged}" />
 
+        <TextBlock x:Name="ValidationMessage"
+                   Margin="0,10,0,0"
+                   Style="{StaticResource Zara.ErrorText}"
+                   AutomationProperties.LiveSetting="Assertive"
+                   Visibility="Collapsed" />
+
         <StackPanel Margin="0,24,0,0" HorizontalAlignment="Right" Orientation="Horizontal">
-          <Button Width="88" Style="{StaticResource Zara.Button}" IsCancel="True" Content="취소" />
-          <Button Width="104" Margin="8,0,0,0" Style="{StaticResource Zara.PrimaryButton}"
+          <Button Style="{StaticResource Zara.Button}" IsCancel="True" Content="취소" />
+          <Button x:Name="SaveButton" Margin="8,0,0,0" Style="{StaticResource Zara.PrimaryButton}"
                   IsDefault="True" Click="Save_Click" Content="예약 등록" />
         </StackPanel>
       </StackPanel>
