@@ -45,6 +45,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private DesktopRestartSettings _restartSettings = DesktopRestartSettings.Default;
     private bool _lockConditionRequired;
     private bool _exitRequestInProgress;
+    private CancellationTokenSource? _trayExitCancellation;
     private bool _systemEventsSubscribed;
     private bool _externalActivationRequested;
     private CancellationTokenSource? _systemShutdownWatchdog;
@@ -300,6 +301,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     /// <inheritdoc />
     public async Task ApplyPolicyLockRequirementAsync(
         bool lockRequired,
+        bool lockRequiredAfterRestart,
         CancellationToken cancellationToken = default)
     {
         ThrowIfShuttingDown();
@@ -307,11 +309,15 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
 
         RestartContinuityUseCase continuity = GetRestartContinuity();
         LockRuntimeUseCase runtime = GetLockRuntime();
-        if (lockRequired)
+        if (lockRequiredAfterRestart)
         {
             _ = await continuity
                 .PublishLockConditionAsync(lockRequired: true, cancellationToken)
                 .ConfigureAwait(true);
+        }
+
+        if (lockRequired)
+        {
             _lockConditionRequired = true;
             await RequireOverlayProjectionAsync().ConfigureAwait(true);
             return;
@@ -331,9 +337,13 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             throw;
         }
 
-        _ = await continuity
-            .PublishLockConditionAsync(lockRequired: false, cancellationToken)
-            .ConfigureAwait(true);
+        if (!lockRequiredAfterRestart)
+        {
+            _ = await continuity
+                .PublishLockConditionAsync(lockRequired: false, cancellationToken)
+                .ConfigureAwait(true);
+        }
+
         _lockConditionRequired = false;
     }
 
@@ -366,6 +376,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private async Task RequestDevelopmentUnlockAsync()
     {
         ThrowIfShuttingDown();
+        _trayExitCancellation?.Cancel();
         RestartContinuityUseCase continuity = GetRestartContinuity();
         LockRuntimeUseCase runtime = GetLockRuntime();
 
@@ -770,8 +781,11 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             return;
         }
 
+        bool requiresRecovery = GetUsagePolicyRuntime().CurrentSnapshot.Evaluation.LockRequiredAfterRestart;
         MessageBoxResult result = System.Windows.MessageBox.Show(
-            "프로그램이 종료되면 수면 시간을 감지할 수 없습니다. 정말로 종료하시겠습니까?",
+            requiresRecovery
+                ? "잠금이 필요한 시간에는 긴급 해제 중이어도 프로그램이 다시 실행됩니다. 정말로 종료하시겠습니까?"
+                : "프로그램이 종료되면 수면 시간을 감지할 수 없습니다. 정말로 종료하시겠습니까?",
             "ZARA",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning,
@@ -782,30 +796,37 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         }
 
         _exitRequestInProgress = true;
+        using var exitCancellation = new CancellationTokenSource();
+        _trayExitCancellation = exitCancellation;
         try
         {
-            LockRuntimeUseCase runtime = GetLockRuntime();
-            RestartContinuityUseCase continuity = GetRestartContinuity();
+            var exit = new DesktopExitUseCase(
+                GetUsagePolicyRuntime(),
+                GetLockRuntime(),
+                GetRestartContinuity());
+            await exit.ExecuteAsync(recoverLock => Dispatcher.InvokeAsync(() =>
+            {
+                if (recoverLock)
+                {
+                    exitCancellation.Token.ThrowIfCancellationRequested();
+                }
 
-            await runtime.PrepareForExitAsync().ConfigureAwait(true);
-            _ = await continuity
-                .PublishOverlayProjectionAsync(OverlayProjectionState.Hidden)
-                .ConfigureAwait(true);
-            _ = await continuity.ReleaseForExplicitExitAsync().ConfigureAwait(true);
-            IsShuttingDown = true;
-            CancelSystemShutdownWatchdog();
-            Shutdown(SupervisionProtocol.ExplicitExitCode);
+                IsShuttingDown = true;
+                CancelSystemShutdownWatchdog();
+                Shutdown(recoverLock ? 0 : SupervisionProtocol.ExplicitExitCode);
+            }).Task, exitCancellation.Token).ConfigureAwait(true);
         }
         catch (Exception exception)
         {
             Trace.TraceError("The explicit desktop exit failed: {0}", exception);
-            if (_lockConditionRequired)
+            if (!exitCancellation.IsCancellationRequested && _lockConditionRequired)
             {
                 await RestoreRequiredOverlayBestEffortAsync().ConfigureAwait(true);
             }
         }
         finally
         {
+            _trayExitCancellation = null;
             if (!IsShuttingDown)
             {
                 _exitRequestInProgress = false;

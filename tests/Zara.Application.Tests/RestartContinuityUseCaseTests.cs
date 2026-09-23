@@ -244,22 +244,25 @@ public sealed class RestartContinuityUseCaseTests
     }
 
     [TestMethod]
-    public async Task ExplicitExitReleasesLockedLeaseWithoutPublishingUnlock()
+    public async Task ExplicitExitCannotReleaseRequiredLockRecovery()
     {
         var port = new RecordingContinuityPort();
         using var useCase = new RestartContinuityUseCase(port);
         _ = await useCase.PublishLockConditionAsync(lockRequired: true);
 
-        RestartContinuityRelease release =
-            await useCase.ReleaseForExplicitExitAsync();
+        await Assert.ThrowsExactlyAsync<InvalidOperationException>(
+            () => useCase.ReleaseForExplicitExitAsync());
 
-        Assert.AreEqual(2, release.Revision);
         Assert.HasCount(1, port.PublishedLeases);
         Assert.IsTrue(port.PublishedLeases[0].LockRequired);
-        Assert.HasCount(1, port.Releases);
-        Assert.AreSame(release, port.Releases[0]);
+        Assert.IsEmpty(port.Releases);
+        Assert.IsFalse(useCase.IsReleased);
+        Assert.IsTrue(useCase.CurrentAcknowledgedLease!.Decision.RecoverLock);
+
+        await useCase.PublishLockConditionAsync(lockRequired: false);
+        RestartContinuityRelease release = await useCase.ReleaseForExplicitExitAsync();
+        Assert.AreEqual(3, release.Revision);
         Assert.IsTrue(useCase.IsReleased);
-        Assert.IsNull(useCase.CurrentAcknowledgedLease);
     }
 
     [TestMethod]

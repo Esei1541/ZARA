@@ -182,7 +182,7 @@ public sealed class WindowsSupervisionPipeServerTests
             server.HandleAuthenticatedConnectionAsync(
                 channel,
                 lifetime,
-                CreateRegistration(104, restartRequired: true, recoverLock: true, null),
+                CreateRegistration(104, restartRequired: true, recoverLock: false, null),
                 CancellationToken.None));
 
         Assert.IsTrue(source.Current.RestartRequired);
@@ -328,15 +328,109 @@ public sealed class WindowsSupervisionPipeServerTests
         await server.HandleAuthenticatedConnectionAsync(
             channel,
             lifetime,
-            CreateRegistration(105, restartRequired: true, recoverLock: true, null),
+            CreateRegistration(105, restartRequired: true, recoverLock: false, null),
             CancellationToken.None);
 
+        Assert.AreEqual(SupervisionResponseKind.ExitAcknowledged, channel.Responses.Last().Kind);
         Assert.AreEqual(expectedRestart, source.Current.RestartRequired);
         Assert.AreEqual(
             expectedRestart
                 ? SupervisionDirectiveReason.LeaseUpdated
                 : SupervisionDirectiveReason.ExplicitRelease,
             source.Current.Reason);
+    }
+
+    [TestMethod]
+    public async Task ProtectedReleaseIsRejectedAndExplicitExitMarkerStillRestarts()
+    {
+        var source = CreateReleasedSource();
+        var server = CreateServer(source, new DesktopLaunchHandshakeRegistry());
+        var release = new SupervisionRequest(
+            SupervisionProtocol.CurrentVersion,
+            SupervisionRequestKind.ReleaseForExplicitExit,
+            Process: null,
+            new SupervisionLease(1, false, false),
+            Revision: null,
+            LaunchToken: null);
+        var channel = new ScriptedChannel([release]);
+        var lifetime = new FakeDesktopLifetime(processId: 117);
+        lifetime.Exit(SupervisionProtocol.ExplicitExitCode);
+
+        await server.HandleAuthenticatedConnectionAsync(
+            channel,
+            lifetime,
+            CreateRegistration(117, restartRequired: true, recoverLock: true, null),
+            CancellationToken.None);
+
+        SupervisionResponse[] responses = channel.Responses.ToArray();
+        Assert.HasCount(2, responses);
+        Assert.AreEqual(SupervisionResponseKind.Registered, responses[0].Kind);
+        Assert.AreEqual(SupervisionResponseKind.Rejected, responses[1].Kind);
+        Assert.AreEqual("LOCK_RECOVERY_REQUIRED", responses[1].ErrorCode);
+        Assert.AreEqual(0, responses[1].AcknowledgedRevision);
+        Assert.IsTrue(source.Current.RestartRequired);
+        Assert.AreEqual(SupervisionDirectiveReason.LeaseUpdated, source.Current.Reason);
+    }
+
+    [TestMethod]
+    public async Task ProtectedReleaseKeepsChannelAndRevisionUntilNormalLeaseCommits()
+    {
+        var source = CreateReleasedSource();
+        var server = CreateServer(source, new DesktopLaunchHandshakeRegistry());
+        var protectedRelease = new SupervisionRequest(
+            SupervisionProtocol.CurrentVersion,
+            SupervisionRequestKind.ReleaseForExplicitExit,
+            Process: null,
+            new SupervisionLease(1, false, false),
+            Revision: null,
+            LaunchToken: null);
+        var normalLease = new SupervisionRequest(
+            SupervisionProtocol.CurrentVersion,
+            SupervisionRequestKind.UpdateLease,
+            Process: null,
+            new SupervisionLease(1, true, false),
+            Revision: null,
+            LaunchToken: null);
+        var commit = new SupervisionRequest(
+            SupervisionProtocol.CurrentVersion,
+            SupervisionRequestKind.CommitLease,
+            Process: null,
+            Lease: null,
+            Revision: 1,
+            LaunchToken: null);
+        var normalRelease = new SupervisionRequest(
+            SupervisionProtocol.CurrentVersion,
+            SupervisionRequestKind.ReleaseForExplicitExit,
+            Process: null,
+            new SupervisionLease(2, false, false),
+            Revision: null,
+            LaunchToken: null);
+        var channel = new ScriptedChannel([
+            protectedRelease,
+            normalLease,
+            commit,
+            normalRelease,
+        ]);
+        var lifetime = new FakeDesktopLifetime(processId: 118);
+        lifetime.Exit(SupervisionProtocol.ExplicitExitCode);
+
+        await server.HandleAuthenticatedConnectionAsync(
+            channel,
+            lifetime,
+            CreateRegistration(118, restartRequired: true, recoverLock: true, null),
+            CancellationToken.None);
+
+        SupervisionResponse[] responses = channel.Responses.ToArray();
+        Assert.HasCount(4, responses);
+        Assert.AreEqual(SupervisionResponseKind.Registered, responses[0].Kind);
+        Assert.AreEqual(SupervisionResponseKind.Rejected, responses[1].Kind);
+        Assert.AreEqual("LOCK_RECOVERY_REQUIRED", responses[1].ErrorCode);
+        Assert.AreEqual(SupervisionResponseKind.LeasePrepared, responses[2].Kind);
+        Assert.AreEqual(1, responses[2].AcknowledgedRevision);
+        Assert.AreEqual(SupervisionResponseKind.ExitAcknowledged, responses[3].Kind);
+        Assert.AreEqual(2, responses[3].AcknowledgedRevision);
+        Assert.IsFalse(source.Current.RestartRequired);
+        Assert.AreEqual(SupervisionDirectiveReason.ExplicitRelease, source.Current.Reason);
     }
 
     [TestMethod]

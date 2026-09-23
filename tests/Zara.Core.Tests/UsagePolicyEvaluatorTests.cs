@@ -311,6 +311,8 @@ public sealed class UsagePolicyEvaluatorTests
         Assert.IsTrue(emergencyEvaluation.IsWithinUsageBan);
         Assert.IsTrue(emergencyEvaluation.HasActiveEmergencyUnlock);
         Assert.IsFalse(emergencyEvaluation.LockRequired);
+        Assert.IsTrue(emergencyEvaluation.LockRequiredAfterRestart);
+        Assert.IsFalse(reservationEvaluation.LockRequiredAfterRestart);
         Assert.IsFalse(emergencyEvaluation.IsSettingsChangeAllowed);
     }
 

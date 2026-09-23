@@ -214,6 +214,7 @@ public sealed class MainWindowScheduleBindingTests
     {
         public Task ApplyPolicyLockRequirementAsync(
             bool lockRequired,
+            bool lockRequiredAfterRestart,
             CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
     }
