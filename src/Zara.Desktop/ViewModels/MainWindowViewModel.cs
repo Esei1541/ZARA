@@ -14,7 +14,7 @@ namespace Zara.Desktop.ViewModels;
 /// Exposes desktop shell actions and projects the time-rule runtime into editable WPF settings
 /// controls. Product validation and persistence stay in <see cref="UsagePolicyRuntime"/>.
 /// </summary>
-internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
+internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 {
     internal const string SavedButApplyFailedMessage =
         "설정은 저장했습니다. 현재 잠금 상태를 적용하지 못해 자동으로 다시 시도합니다.";
@@ -83,6 +83,27 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
             new(DayOfWeek.Saturday, "토요일"),
             new(DayOfWeek.Sunday, "일요일"),
         ]);
+        _selectedWeekday = WeekdayRestrictions[0];
+        foreach (DailyUsageRestrictionViewModel editor in WeekdayRestrictions)
+        {
+            editor.Edited += OnWeeklyScheduleEdited;
+        }
+
+        _revertWeekdayCommand = new AsyncCommand(
+            () => { SelectedWeekday.Revert(); return Task.CompletedTask; },
+            ReportWeeklyScheduleFailure,
+            () => CanEditWeeklySchedule && SelectedWeekday.HasChanges);
+        _discardWeeklyScheduleCommand = new AsyncCommand(
+            () => { ResetWeeklyScheduleEdits(); return Task.CompletedTask; },
+            ReportWeeklyScheduleFailure,
+            () => CanEditWeeklySchedule && HasWeeklyScheduleChanges);
+        _confirmWeeklyScheduleCommand = new AsyncCommand(
+            ConfirmWeeklyScheduleAsync,
+            ReportWeeklyScheduleFailure,
+            () => CanEditWeeklySchedule && IsWeeklyScheduleConfirmationVisible);
+        CancelWeeklyScheduleConfirmationCommand = new AsyncCommand(
+            () => { ClearWeeklyScheduleConfirmation(); return Task.CompletedTask; },
+            ReportWeeklyScheduleFailure);
         EmergencyWeeklyResetDays =
         [
             new(DayOfWeek.Sunday, "일요일"),
@@ -107,7 +128,7 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         _saveWeeklyScheduleCommand = new AsyncCommand(
             SaveWeeklyScheduleAsync,
             ReportWeeklyScheduleFailure,
-            () => CanChangeUsagePolicySettings);
+            () => CanEditWeeklySchedule && string.IsNullOrEmpty(WeeklyScheduleValidationMessage));
         _saveEmergencyUnlockSettingsCommand = new AsyncCommand(
             SaveEmergencyUnlockSettingsAsync,
             ReportEmergencyUnlockSettingsFailure,
@@ -370,13 +391,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>Persists the weekday form without reading or changing the emergency tab.</summary>
     internal async Task SaveWeeklyScheduleAsync()
     {
-        await RequireUsagePolicyRuntime()
-            .UpdateWeeklyScheduleAsync(BuildWeeklySchedule())
+        WeeklyUsageRestrictionSchedule candidate = BuildWeeklySchedule();
+        await SaveWeeklyScheduleCandidateAsync(candidate, immediateLockConfirmed: false)
             .ConfigureAwait(true);
-        RequestNotification(
-            "사용 금지 시각",
-            "사용 금지 시각을 저장했습니다.",
-            isError: false);
     }
 
     /// <summary>Persists the emergency-unlock form without reading or changing the weekday tab.</summary>
@@ -421,12 +438,9 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
 
         WeeklyUsageRestrictionSchedule schedule =
             _usagePolicyRuntime.CurrentSnapshot.Settings.WeeklySchedule;
-        foreach (DailyUsageRestrictionViewModel editor in WeekdayRestrictions)
-        {
-            editor.Load(schedule.GetRestriction(editor.DayOfWeek));
-        }
-
-        _loadedWeeklySchedule = schedule;
+        LoadWeeklySchedule(schedule);
+        ClearWeeklyScheduleConfirmation();
+        UpdateWeeklySchedulePresentation();
     }
 
     /// <summary>Discards emergency-tab edits and restores the latest runtime settings.</summary>
@@ -516,12 +530,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         _isSettingsChangeAllowed = snapshot.Evaluation.IsSettingsChangeAllowed;
         if (!Equals(_loadedWeeklySchedule, snapshot.Settings.WeeklySchedule))
         {
-            foreach (DailyUsageRestrictionViewModel editor in WeekdayRestrictions)
+            if (_loadedWeeklySchedule is null)
             {
-                editor.Load(snapshot.Settings.WeeklySchedule.GetRestriction(editor.DayOfWeek));
+                SelectedWeekday = WeekdayRestrictions.Single(day => day.DayOfWeek == snapshot.EvaluatedLocalTime.DayOfWeek);
             }
 
-            _loadedWeeklySchedule = snapshot.Settings.WeeklySchedule;
+            LoadWeeklySchedule(snapshot.Settings.WeeklySchedule);
         }
 
         if (!Equals(_loadedEmergencyUnlockSettings, snapshot.Settings.EmergencyUnlock))
@@ -551,6 +565,12 @@ internal sealed class MainWindowViewModel : INotifyPropertyChanged, IDisposable
         _saveExecutionSettingsCommand.NotifyCanExecuteChanged();
         _saveWeeklyScheduleCommand.NotifyCanExecuteChanged();
         _saveEmergencyUnlockSettingsCommand.NotifyCanExecuteChanged();
+        if (!CanChangeSettings)
+        {
+            ClearWeeklyScheduleConfirmation();
+        }
+
+        UpdateWeeklySchedulePresentation();
     }
 
     private void ReplaceReservationRows(IEnumerable<OutOfHoursReservation> reservations)

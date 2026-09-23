@@ -385,7 +385,7 @@ public sealed class MainWindowViewModelTests
         Assert.IsTrue(viewModel.WeekdayRestrictions.All(day => !day.IsRestrictionEnabled));
         DailyUsageRestrictionViewModel monday = viewModel.WeekdayRestrictions.Single(
             day => day.DayOfWeek == DayOfWeek.Monday);
-        Assert.AreEqual("9", monday.StartTime.HourText);
+        Assert.AreEqual("09", monday.StartTime.HourText);
         Assert.AreEqual("10", monday.ReleaseTime.HourText);
         Assert.AreEqual("17", viewModel.EmergencyDurationMinutesText);
         Assert.IsTrue(viewModel.CanChangeSettings);
@@ -542,7 +542,9 @@ public sealed class MainWindowViewModelTests
         viewModel.NotificationRequested += (_, notification) =>
             notificationSource.TrySetResult(notification);
 
-        viewModel.SaveWeeklyScheduleCommand.Execute(parameter: null);
+        await viewModel.SaveWeeklyScheduleAsync();
+        Assert.IsTrue(viewModel.IsWeeklyScheduleConfirmationVisible);
+        viewModel.ConfirmWeeklyScheduleCommand.Execute(parameter: null);
         MainWindowNotificationEventArgs result = await notificationSource.Task.WaitAsync(
             TimeSpan.FromSeconds(5));
 
@@ -592,7 +594,7 @@ public sealed class MainWindowViewModelTests
 #endif
 
     [STATestMethod]
-    public async Task InvalidEnabledMidnightIntervalRaisesKoreanPopupResult()
+    public async Task InvalidEnabledMidnightIntervalShowsValidationAndPreventsSaving()
     {
         using var runtime = CreateRuntime(
             new RecordingStore(UsagePolicySettings.Default),
@@ -603,19 +605,11 @@ public sealed class MainWindowViewModelTests
         DailyUsageRestrictionViewModel monday = viewModel.WeekdayRestrictions.Single(
             day => day.DayOfWeek == DayOfWeek.Monday);
         monday.IsRestrictionEnabled = true;
-        var notificationSource = new TaskCompletionSource<MainWindowNotificationEventArgs>(
-            TaskCreationOptions.RunContinuationsAsynchronously);
-        viewModel.NotificationRequested += (_, notification) =>
-            notificationSource.TrySetResult(notification);
-
-        viewModel.SaveWeeklyScheduleCommand.Execute(parameter: null);
-        MainWindowNotificationEventArgs result = await notificationSource.Task.WaitAsync(
-            TimeSpan.FromSeconds(5));
-
-        Assert.IsTrue(result.IsError);
+        Assert.IsFalse(viewModel.SaveWeeklyScheduleCommand.CanExecute(null));
         Assert.AreEqual(
             "월요일의 시작 시각과 해제 시각은 다르게 입력하세요.",
-            result.Message);
+            viewModel.WeeklyScheduleValidationMessage);
+        await Assert.ThrowsAsync<ArgumentException>(() => viewModel.SaveWeeklyScheduleAsync());
     }
 
     [STATestMethod]
@@ -901,9 +895,102 @@ public sealed class MainWindowViewModelTests
         viewModel.ResetUsagePolicyEdits();
 
         Assert.IsTrue(monday.IsRestrictionEnabled);
-        Assert.AreEqual("9", monday.StartTime.HourText);
+        Assert.AreEqual("09", monday.StartTime.HourText);
         Assert.AreEqual("27", viewModel.EmergencyDurationMinutesText);
         Assert.AreEqual("6", viewModel.EmergencySentenceCountText);
+    }
+
+    [STATestMethod]
+    public async Task RevertingOneDayPreservesOtherDraftsAndUsesTheLatestSavedValue()
+    {
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        using var runtime = CreateRuntime(store,
+            new ManualTimeProvider(new DateTimeOffset(2026, 9, 23, 19, 26, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        DailyUsageRestrictionViewModel wednesday = viewModel.SelectedWeekday;
+        DailyUsageRestrictionViewModel thursday = viewModel.WeekdayRestrictions.Single(day => day.DayOfWeek == DayOfWeek.Thursday);
+        wednesday.StartTime.Set(new TimeOnly(19, 30));
+        wednesday.ReleaseTime.Set(new TimeOnly(19, 31));
+        wednesday.IsRestrictionEnabled = true;
+        await viewModel.SaveWeeklyScheduleAsync();
+
+        wednesday.StartTime.HourText = string.Empty;
+        thursday.StartTime.Set(new TimeOnly(23, 0));
+        thursday.ReleaseTime.Set(new TimeOnly(5, 0));
+        thursday.IsRestrictionEnabled = true;
+        viewModel.RevertWeekdayCommand.Execute(null);
+
+        Assert.AreEqual("19:30", wednesday.StartTime.DisplayTime);
+        Assert.IsFalse(wednesday.HasChanges);
+        Assert.IsTrue(thursday.HasChanges);
+        Assert.AreEqual("다음 날 해제", thursday.EndDay);
+        Assert.AreEqual(1, store.SaveCount);
+        viewModel.DiscardWeeklyScheduleCommand.Execute(null);
+        Assert.IsFalse(viewModel.HasWeeklyScheduleChanges);
+        Assert.AreEqual("19:30", wednesday.StartTime.DisplayTime);
+        Assert.IsFalse(thursday.IsRestrictionEnabled);
+    }
+
+    [STATestMethod]
+    public async Task ImmediateLockConfirmationDoesNotSaveAndAnEditCancelsThePendingCandidate()
+    {
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        using var runtime = CreateRuntime(store,
+            new ManualTimeProvider(new DateTimeOffset(2026, 9, 23, 19, 26, 0, TimeSpan.Zero)));
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        DailyUsageRestrictionViewModel wednesday = viewModel.SelectedWeekday;
+        wednesday.StartTime.Set(new TimeOnly(19, 0));
+        wednesday.ReleaseTime.Set(new TimeOnly(19, 31));
+        wednesday.IsRestrictionEnabled = true;
+
+        await viewModel.SaveWeeklyScheduleAsync();
+        Assert.IsTrue(viewModel.IsWeeklyScheduleConfirmationVisible);
+        Assert.AreEqual(0, store.SaveCount);
+        Assert.AreEqual("적용 시 바로 잠김", viewModel.WeeklyScheduleImpact);
+
+        wednesday.StartTime.Set(new TimeOnly(19, 30));
+        Assert.IsFalse(viewModel.IsWeeklyScheduleConfirmationVisible);
+        await viewModel.ConfirmWeeklyScheduleAsync();
+        Assert.AreEqual(0, store.SaveCount);
+        await viewModel.SaveWeeklyScheduleAsync();
+        Assert.AreEqual(new TimeOnly(19, 30), store.Settings.WeeklySchedule.Wednesday.StartTime);
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
+    }
+
+    [STATestMethod]
+    public async Task ImmediateLockWarningTracksTheStartAndEndWhileConfirmationIsOpen()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 23, 19, 29, 0, TimeSpan.Zero));
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        using var runtime = CreateRuntime(store, clock);
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        DailyUsageRestrictionViewModel wednesday = viewModel.SelectedWeekday;
+        wednesday.StartTime.Set(new TimeOnly(19, 30));
+        wednesday.ReleaseTime.Set(new TimeOnly(19, 31));
+        wednesday.IsRestrictionEnabled = true;
+        Assert.IsFalse(viewModel.WillLockImmediately);
+
+        clock.SetUtcNow(new DateTimeOffset(2026, 9, 23, 19, 30, 0, TimeSpan.Zero));
+        await viewModel.SaveWeeklyScheduleAsync();
+
+        Assert.AreEqual(0, store.SaveCount);
+        Assert.IsTrue(viewModel.IsWeeklyScheduleConfirmationVisible);
+        Assert.IsTrue(viewModel.WillLockImmediately);
+        Assert.AreEqual("적용 시 바로 잠김", viewModel.WeeklyScheduleImpact);
+
+        clock.SetUtcNow(new DateTimeOffset(2026, 9, 23, 19, 31, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+
+        Assert.IsFalse(viewModel.WillLockImmediately);
+        Assert.IsFalse(viewModel.IsWeeklyScheduleConfirmationVisible);
+        Assert.IsFalse(viewModel.ConfirmWeeklyScheduleCommand.CanExecute(null));
+        Assert.IsTrue(wednesday.HasChanges);
+        await viewModel.SaveWeeklyScheduleAsync();
+        Assert.AreEqual(1, store.SaveCount);
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
     }
 
     private static MainWindowViewModel CreateViewModel(UsagePolicyRuntime runtime) =>

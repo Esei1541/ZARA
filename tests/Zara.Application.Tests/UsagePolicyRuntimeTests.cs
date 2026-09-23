@@ -6,6 +6,9 @@ namespace Zara.Application.Tests;
 [TestClass]
 public sealed class UsagePolicyRuntimeTests
 {
+    private static readonly bool[] ExpectedNoLockRequirements = [false];
+    private static readonly bool[] ExpectedNewLockRequirements = [false, true];
+    private static readonly bool[] ExpectedSingleMinuteLockRequirements = [false, true, false];
     private static readonly bool[] ExpectedInitialLockRequirement = [true];
     private static readonly bool[] ExpectedLockThenUnlockRequirements = [true, false];
     private static readonly bool[] ExpectedUnlockThenLockRequirements = [true, false, true];
@@ -714,6 +717,146 @@ public sealed class UsagePolicyRuntimeTests
         CollectionAssert.AreEqual(
             new[] { reservation },
             store.Settings.Reservations.ToArray());
+    }
+
+    [TestMethod]
+    public async Task FutureWeeklyRestrictionSavesWithoutConfirmationAndLocksOnlyForItsMinute()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 23, 19, 26, 0, TimeSpan.Zero));
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        WeeklyUsageRestrictionSchedule schedule = CreateSchedule(
+            DayOfWeek.Wednesday, new TimeOnly(19, 30), new TimeOnly(19, 31));
+
+        UsagePolicyRuntimeSnapshot preview = runtime.PreviewWeeklySchedule(schedule);
+        Assert.IsFalse(preview.Evaluation.LockRequired);
+        Assert.AreEqual(new DateTime(2026, 9, 23, 19, 30, 0), preview.NextLockStartLocalTime);
+        Assert.IsTrue(await runtime.TryUpdateWeeklyScheduleAsync(schedule, immediateLockConfirmed: false));
+        Assert.AreEqual(1, store.SaveCount);
+        Assert.AreEqual(schedule, store.Settings.WeeklySchedule);
+        CollectionAssert.AreEqual(ExpectedNoLockRequirements, lockPort.AppliedRequirements);
+
+        clock.SetUtcNow(new DateTimeOffset(2026, 9, 23, 19, 30, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        Assert.IsTrue(lockPort.AppliedRequirements.Last());
+
+        clock.SetUtcNow(new DateTimeOffset(2026, 9, 23, 19, 31, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        CollectionAssert.AreEqual(ExpectedSingleMinuteLockRequirements, lockPort.AppliedRequirements);
+    }
+
+    [TestMethod]
+    public async Task ImmediateWeeklyRestrictionRequiresConfirmationBeforeSaving()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 23, 19, 26, 0, TimeSpan.Zero));
+        UsagePolicySettings original = UsagePolicySettings.Default;
+        var store = new RecordingStore(original);
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        WeeklyUsageRestrictionSchedule schedule = CreateSchedule(
+            DayOfWeek.Wednesday, new TimeOnly(19, 0), new TimeOnly(19, 31));
+
+        Assert.IsTrue(runtime.PreviewWeeklySchedule(schedule).Evaluation.LockRequired);
+        Assert.IsFalse(await runtime.TryUpdateWeeklyScheduleAsync(schedule, immediateLockConfirmed: false));
+        Assert.AreEqual(0, store.SaveCount);
+        Assert.AreSame(original, store.Settings);
+        Assert.AreSame(original, runtime.CurrentSnapshot.Settings);
+        CollectionAssert.AreEqual(ExpectedNoLockRequirements, lockPort.AppliedRequirements);
+
+        Assert.IsTrue(await runtime.TryUpdateWeeklyScheduleAsync(schedule, immediateLockConfirmed: true));
+        Assert.AreEqual(1, store.SaveCount);
+        Assert.AreEqual(schedule, store.Settings.WeeklySchedule);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        CollectionAssert.AreEqual(ExpectedNewLockRequirements, lockPort.AppliedRequirements);
+    }
+
+    [TestMethod]
+    public async Task WeeklyScheduleSaveChecksTheClockAgainAfterAFuturePreview()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 23, 19, 29, 0, TimeSpan.Zero));
+        UsagePolicySettings original = UsagePolicySettings.Default;
+        var store = new RecordingStore(original);
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        WeeklyUsageRestrictionSchedule schedule = CreateSchedule(
+            DayOfWeek.Wednesday, new TimeOnly(19, 30), new TimeOnly(19, 31));
+
+        UsagePolicyRuntimeSnapshot preview = runtime.PreviewWeeklySchedule(schedule);
+        Assert.IsFalse(preview.Evaluation.LockRequired);
+        Assert.AreEqual(new DateTime(2026, 9, 23, 19, 30, 0), preview.NextLockStartLocalTime);
+        clock.SetUtcNow(new DateTimeOffset(2026, 9, 23, 19, 30, 0, TimeSpan.Zero));
+
+        Assert.IsFalse(await runtime.TryUpdateWeeklyScheduleAsync(schedule, immediateLockConfirmed: false));
+        Assert.IsTrue(runtime.PreviewWeeklySchedule(schedule).Evaluation.LockRequired);
+        Assert.AreEqual(0, store.SaveCount);
+        Assert.AreSame(original, store.Settings);
+        Assert.AreSame(original, runtime.CurrentSnapshot.Settings);
+        CollectionAssert.AreEqual(ExpectedNoLockRequirements, lockPort.AppliedRequirements);
+    }
+
+    [TestMethod]
+    public async Task ActiveReservationDefersNewWeeklyLockAndSurvivesScheduleSave()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 23, 19, 26, 0, TimeSpan.Zero));
+        var reservation = new OutOfHoursReservation(
+            Guid.NewGuid(), new DateOnly(2026, 9, 23),
+            new TimeOnly(19, 0), new TimeOnly(20, 0), "적용 중");
+        var emergency = new EmergencyUnlockSettings(durationMinutes: 23, sentenceCount: 5);
+        var store = new RecordingStore(new UsagePolicySettings(
+            WeeklyUsageRestrictionSchedule.Default, emergency, [reservation]));
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        WeeklyUsageRestrictionSchedule schedule = CreateSchedule(
+            DayOfWeek.Wednesday, new TimeOnly(19, 0), new TimeOnly(21, 0));
+
+        UsagePolicyRuntimeSnapshot preview = runtime.PreviewWeeklySchedule(schedule);
+        Assert.IsTrue(preview.Evaluation.HasActiveReservation);
+        Assert.IsFalse(preview.Evaluation.LockRequired);
+        Assert.AreEqual(new DateTime(2026, 9, 23, 20, 0, 0), preview.NextLockStartLocalTime);
+        Assert.IsTrue(await runtime.TryUpdateWeeklyScheduleAsync(schedule, immediateLockConfirmed: false));
+
+        Assert.AreEqual(1, store.SaveCount);
+        Assert.AreEqual(schedule, store.Settings.WeeklySchedule);
+        Assert.AreSame(emergency, store.Settings.EmergencyUnlock);
+        CollectionAssert.AreEqual(new[] { reservation }, store.Settings.Reservations.ToArray());
+        Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        CollectionAssert.AreEqual(ExpectedNoLockRequirements, lockPort.AppliedRequirements);
+    }
+
+    [TestMethod]
+    public async Task OvernightWeeklyRestrictionRequiresConfirmationAfterMidnight()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 23, 22, 0, 0, TimeSpan.Zero));
+        UsagePolicySettings original = UsagePolicySettings.Default;
+        var store = new RecordingStore(original);
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        WeeklyUsageRestrictionSchedule schedule = CreateSchedule(
+            DayOfWeek.Wednesday, new TimeOnly(23, 0), new TimeOnly(5, 0));
+
+        UsagePolicyRuntimeSnapshot preview = runtime.PreviewWeeklySchedule(schedule);
+        Assert.IsFalse(preview.Evaluation.LockRequired);
+        Assert.AreEqual(new DateTime(2026, 9, 23, 23, 0, 0), preview.NextLockStartLocalTime);
+        clock.SetUtcNow(new DateTimeOffset(2026, 9, 24, 1, 0, 0, TimeSpan.Zero));
+
+        Assert.IsFalse(await runtime.TryUpdateWeeklyScheduleAsync(schedule, immediateLockConfirmed: false));
+        Assert.AreEqual(0, store.SaveCount);
+        Assert.AreSame(original, store.Settings);
+        CollectionAssert.AreEqual(ExpectedNoLockRequirements, lockPort.AppliedRequirements);
+
+        Assert.IsTrue(await runtime.TryUpdateWeeklyScheduleAsync(schedule, immediateLockConfirmed: true));
+        Assert.AreEqual(1, store.SaveCount);
+        Assert.AreEqual(schedule, store.Settings.WeeklySchedule);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);
+        CollectionAssert.AreEqual(ExpectedNewLockRequirements, lockPort.AppliedRequirements);
     }
 
     [TestMethod]

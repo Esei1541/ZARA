@@ -1,0 +1,175 @@
+<UserControl x:Class="Zara.Desktop.WeeklyScheduleView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:behaviors="clr-namespace:Zara.Desktop.Behaviors">
+  <UserControl.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Styles/SettingsStyles.xaml" />
+      </ResourceDictionary.MergedDictionaries>
+      <BooleanToVisibilityConverter x:Key="BooleanVisibility" />
+    </ResourceDictionary>
+  </UserControl.Resources>
+  <Grid Background="{StaticResource Zara.Brush.Background}"
+        TextElement.Foreground="{StaticResource Zara.Brush.Text}"
+        TextElement.FontFamily="{StaticResource Zara.Font.Family}"
+        TextElement.FontSize="14"
+        IsEnabled="{Binding CanEditWeeklySchedule}">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <Grid Margin="18">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="0.85*" MinWidth="210" />
+          <ColumnDefinition Width="20" />
+          <ColumnDefinition Width="1.25*" MinWidth="340" />
+        </Grid.ColumnDefinitions>
+        <StackPanel>
+          <TextBlock Text="요일별 잠금 시간" Style="{StaticResource Zara.Heading}" />
+          <TextBlock Text="현재 적용 중인 일정" Margin="0,4,0,14" Style="{StaticResource Zara.SecondaryText}" />
+          <ListBox x:Name="WeekdayList" ItemsSource="{Binding WeekdayRestrictions}"
+                   SelectedItem="{Binding SelectedWeekday, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                   ItemContainerStyle="{StaticResource Zara.DayItem}"
+                   Background="Transparent" BorderThickness="0"
+                   ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                   ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                   AutomationProperties.Name="요일별 잠금 시간">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="{Binding DisplayName}" Margin="0,0,10,0" />
+                  <StackPanel Grid.Column="1">
+                    <TextBlock Text="{Binding SavedSummary}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding ChangeStatus}" Style="{StaticResource Zara.SecondaryText}" Margin="0,4,0,0" />
+                  </StackPanel>
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </StackPanel>
+        <Border Grid.Column="2" Style="{StaticResource Zara.Panel}" VerticalAlignment="Top">
+          <StackPanel>
+            <Grid>
+              <TextBlock Text="{Binding SelectedWeekday.EditorTitle}" Style="{StaticResource Zara.Heading}" />
+              <CheckBox x:Name="EnabledCheckBox" Content="활성화" HorizontalAlignment="Right"
+                        IsChecked="{Binding SelectedWeekday.IsRestrictionEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        Style="{StaticResource Zara.CheckBox}" />
+            </Grid>
+            <DockPanel Margin="0,14">
+              <Button x:Name="RevertButton" DockPanel.Dock="Right" Content="되돌리기"
+                      Command="{Binding RevertWeekdayCommand}" Style="{StaticResource Zara.Button}" Padding="9,5"
+                      AutomationProperties.Name="선택한 요일을 저장값으로 되돌리기" />
+              <TextBlock Text="{Binding SelectedWeekday.SavedDescription}" VerticalAlignment="Center"
+                         TextWrapping="Wrap" Margin="0,0,8,0" Style="{StaticResource Zara.SecondaryText}" />
+            </DockPanel>
+            <StackPanel DataContext="{Binding SelectedWeekday}" IsEnabled="{Binding IsRestrictionEnabled}">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="12" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <RadioButton x:Name="StartTimeButton" GroupName="ScheduleEndpoint"
+                             IsChecked="{Binding IsStartSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource Zara.TimeButton}" AutomationProperties.Name="잠금 시작">
+                  <StackPanel>
+                    <TextBlock Text="잠금 시작" />
+                    <TextBlock Text="{Binding StartTime.DisplayTime}" Style="{StaticResource Zara.TimeText}" />
+                    <TextBlock Text="24시간제" Style="{StaticResource Zara.SecondaryText}" />
+                  </StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="ReleaseTimeButton" Grid.Column="2" GroupName="ScheduleEndpoint"
+                             IsChecked="{Binding IsReleaseSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource Zara.TimeButton}" AutomationProperties.Name="잠금 해제">
+                  <StackPanel>
+                    <TextBlock Text="잠금 해제" />
+                    <TextBlock Text="{Binding ReleaseTime.DisplayTime}" Style="{StaticResource Zara.TimeText}" />
+                    <TextBlock Text="{Binding EndDay}" Style="{StaticResource Zara.SecondaryText}" />
+                  </StackPanel>
+                </RadioButton>
+              </Grid>
+              <TextBlock Text="{Binding DraftSummary}" Margin="0,16,0,18" FontWeight="SemiBold" TextWrapping="Wrap" />
+              <Slider x:Name="TimeSlider" Minimum="0" Maximum="1439" TickFrequency="15" SmallChange="1" LargeChange="15"
+                      IsMoveToPointEnabled="True" Value="{Binding SelectedTime.MinutesSinceMidnight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                      AutomationProperties.Name="{Binding SelectedTimeLabel}" Style="{StaticResource Zara.Slider}"
+                      PreviewMouseLeftButtonDown="TimeSlider_PreviewMouseLeftButtonDown"
+                      PreviewMouseLeftButtonUp="TimeSlider_EndMouseAdjustment" LostMouseCapture="TimeSlider_EndMouseAdjustment"
+                      PreviewKeyDown="TimeSlider_PreviewKeyDown" />
+              <Grid Margin="0,4,0,16">
+                <TextBlock Text="00:00" HorizontalAlignment="Left" Style="{StaticResource Zara.SecondaryText}" />
+                <TextBlock Text="12:00" HorizontalAlignment="Center" Style="{StaticResource Zara.SecondaryText}" />
+                <TextBlock Text="23:59" HorizontalAlignment="Right" Style="{StaticResource Zara.SecondaryText}" />
+              </Grid>
+              <UniformGrid Columns="4">
+                <Button Content="−1시간" Command="{Binding EarlierHourCommand}" Style="{StaticResource Zara.Button}" Padding="4,8" Margin="0,0,5,0" />
+                <Button Content="−30분" Command="{Binding EarlierHalfHourCommand}" Style="{StaticResource Zara.Button}" Padding="4,8" Margin="0,0,5,0" />
+                <Button Content="+30분" Command="{Binding LaterHalfHourCommand}" Style="{StaticResource Zara.Button}" Padding="4,8" Margin="0,0,5,0" />
+                <Button Content="+1시간" Command="{Binding LaterHourCommand}" Style="{StaticResource Zara.Button}" Padding="4,8" />
+              </UniformGrid>
+              <StackPanel Orientation="Horizontal" Margin="0,14,0,0" DataContext="{Binding SelectedTime}">
+                <TextBlock Text="직접 입력" VerticalAlignment="Center" Margin="0,0,10,0" />
+                <TextBox x:Name="HourInput" Width="60" MaxLength="2" Style="{StaticResource Zara.TextBox}"
+                         AutomationProperties.Name="시간" InputScope="Number" behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
+                         Text="{Binding HourText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         LostKeyboardFocus="TimeInput_LostKeyboardFocus" />
+                <TextBlock Text=":" VerticalAlignment="Center" Margin="8,0" />
+                <TextBox x:Name="MinuteInput" Width="60" MaxLength="2" Style="{StaticResource Zara.TextBox}"
+                         AutomationProperties.Name="분" InputScope="Number" behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
+                         Text="{Binding MinuteText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                         LostKeyboardFocus="TimeInput_LostKeyboardFocus" />
+              </StackPanel>
+            </StackPanel>
+            <TextBlock Text="{Binding WeeklyScheduleValidationMessage}" Style="{StaticResource Zara.ErrorText}" Margin="0,10,0,0" />
+            <Border BorderBrush="{StaticResource Zara.Brush.Border}" BorderThickness="0,1,0,0" Margin="0,18,0,0" Padding="0,16,0,0">
+              <StackPanel>
+                <TextBlock Text="저장 후 적용될 일정" Style="{StaticResource Zara.SecondaryText}" />
+                <TextBlock x:Name="ImpactText" Text="{Binding WeeklyScheduleImpact}" Margin="0,5,0,0" TextWrapping="Wrap">
+                  <TextBlock.Style>
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource Zara.Heading}">
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding WillLockImmediately}" Value="True">
+                          <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Danger}" />
+                          <Setter Property="FontWeight" Value="Bold" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </TextBlock.Style>
+                </TextBlock>
+                <TextBlock Text="현재 시각이 잠금 시각에 포함되어 있습니다. 설정 시 즉시 잠금이 실행됩니다."
+                           Style="{StaticResource Zara.SecondaryText}" TextWrapping="Wrap" Margin="0,5,0,0"
+                           Visibility="{Binding WillLockImmediately, Converter={StaticResource BooleanVisibility}}" />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </ScrollViewer>
+    <Border Grid.Row="1" Style="{StaticResource Zara.Panel}" Margin="18,0,18,12"
+            Visibility="{Binding IsWeeklyScheduleConfirmationVisible, Converter={StaticResource BooleanVisibility}}">
+      <StackPanel>
+        <TextBlock Text="적용 시 바로 잠김" Foreground="{StaticResource Zara.Brush.Danger}" FontWeight="Bold" />
+        <TextBlock Text="현재 시각이 잠금 시각에 포함되어 있습니다. 설정 시 즉시 잠금이 실행됩니다." Margin="0,6,0,12" TextWrapping="Wrap" />
+        <StackPanel Orientation="Horizontal">
+          <Button Content="계속 편집" Command="{Binding CancelWeeklyScheduleConfirmationCommand}" Style="{StaticResource Zara.Button}" Margin="0,0,8,0" />
+          <Button x:Name="ConfirmSaveButton" Content="저장하고 지금 잠금" Command="{Binding ConfirmWeeklyScheduleCommand}" Style="{StaticResource Zara.PrimaryButton}" />
+        </StackPanel>
+      </StackPanel>
+    </Border>
+    <Border Grid.Row="2" Background="{StaticResource Zara.Brush.Surface}" BorderBrush="{StaticResource Zara.Brush.Border}" BorderThickness="0,1,0,0" Padding="18,14">
+      <DockPanel>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+          <Button Content="전체 변경 취소" Command="{Binding DiscardWeeklyScheduleCommand}" Style="{StaticResource Zara.Button}" Margin="0,0,8,0" />
+          <Button x:Name="SaveButton" Content="일정 저장" Command="{Binding SaveWeeklyScheduleCommand}" Style="{StaticResource Zara.PrimaryButton}" />
+        </StackPanel>
+        <TextBlock Text="{Binding WeeklyScheduleChangeStatus}" VerticalAlignment="Center" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,10,0" />
+      </DockPanel>
+    </Border>
+  </Grid>
+</UserControl>

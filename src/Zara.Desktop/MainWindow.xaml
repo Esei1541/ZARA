@@ -2,6 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:behaviors="clr-namespace:Zara.Desktop.Behaviors"
+        xmlns:local="clr-namespace:Zara.Desktop"
         Title="ZARA"
         Width="980"
         Height="720"
@@ -113,116 +114,8 @@
       </TabItem>
 
       <TabItem x:Name="WeeklyScheduleTab" Header="사용 금지 시각">
-        <Grid Margin="22"
-              IsEnabled="{Binding CanChangeUsagePolicySettings}">
-          <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="12" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="16" />
-            <RowDefinition Height="Auto" />
-          </Grid.RowDefinitions>
-          <TextBlock Foreground="#FF5C6470"
-                     TextWrapping="Wrap"
-                     Text="시작 시각이 해제 시각보다 늦으면 다음 날 해제로 처리합니다. 시작과 해제 시각은 같게 설정할 수 없습니다." />
-          <DataGrid x:Name="WeekdayRestrictionsGrid"
-                    Grid.Row="2"
-                    AutoGenerateColumns="False"
-                    CanUserAddRows="False"
-                    CanUserDeleteRows="False"
-                    CanUserReorderColumns="False"
-                    CanUserResizeRows="False"
-                    HeadersVisibility="Column"
-                    ItemsSource="{Binding WeekdayRestrictions}">
-            <DataGrid.Columns>
-              <DataGridTextColumn Width="120"
-                                  Binding="{Binding DisplayName}"
-                                  Header="요일"
-                                  IsReadOnly="True" />
-              <DataGridTemplateColumn Width="84" Header="사용">
-                <DataGridTemplateColumn.CellTemplate>
-                  <DataTemplate>
-                    <CheckBox HorizontalAlignment="Center"
-                              IsChecked="{Binding IsRestrictionEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                  </DataTemplate>
-                </DataGridTemplateColumn.CellTemplate>
-              </DataGridTemplateColumn>
-              <DataGridTemplateColumn Width="*" Header="시작 시각">
-                <DataGridTemplateColumn.CellTemplate>
-                  <DataTemplate>
-                    <StackPanel HorizontalAlignment="Center"
-                                Orientation="Horizontal">
-                      <ComboBox Width="68"
-                                ItemsSource="{Binding StartTime.Meridiems}"
-                                SelectedItem="{Binding StartTime.Meridiem}" />
-                      <TextBox Width="48"
-                               Margin="6,0,0,0"
-                               MaxLength="2"
-                               AutomationProperties.Name="시작 시간"
-                               behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
-                               HorizontalContentAlignment="Right"
-                               InputMethod.IsInputMethodEnabled="False"
-                               InputScope="Number"
-                               Text="{Binding StartTime.HourText, UpdateSourceTrigger=PropertyChanged}" />
-                      <TextBlock Margin="5,0"
-                                 VerticalAlignment="Center"
-                                 Text=":" />
-                      <TextBox Width="48"
-                               MaxLength="2"
-                               AutomationProperties.Name="시작 분"
-                               behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
-                               HorizontalContentAlignment="Right"
-                               InputMethod.IsInputMethodEnabled="False"
-                               InputScope="Number"
-                               Text="{Binding StartTime.MinuteText, UpdateSourceTrigger=PropertyChanged}" />
-                    </StackPanel>
-                  </DataTemplate>
-                </DataGridTemplateColumn.CellTemplate>
-              </DataGridTemplateColumn>
-              <DataGridTemplateColumn Width="*" Header="해제 시각">
-                <DataGridTemplateColumn.CellTemplate>
-                  <DataTemplate>
-                    <StackPanel HorizontalAlignment="Center"
-                                Orientation="Horizontal">
-                      <ComboBox Width="68"
-                                ItemsSource="{Binding ReleaseTime.Meridiems}"
-                                SelectedItem="{Binding ReleaseTime.Meridiem}" />
-                      <TextBox Width="48"
-                               Margin="6,0,0,0"
-                               MaxLength="2"
-                               AutomationProperties.Name="해제 시간"
-                               behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
-                               HorizontalContentAlignment="Right"
-                               InputMethod.IsInputMethodEnabled="False"
-                               InputScope="Number"
-                               Text="{Binding ReleaseTime.HourText, UpdateSourceTrigger=PropertyChanged}" />
-                      <TextBlock Margin="5,0"
-                                 VerticalAlignment="Center"
-                                 Text=":" />
-                      <TextBox Width="48"
-                               MaxLength="2"
-                               AutomationProperties.Name="해제 분"
-                               behaviors:DigitsOnlyTextBoxBehavior.IsEnabled="True"
-                               HorizontalContentAlignment="Right"
-                               InputMethod.IsInputMethodEnabled="False"
-                               InputScope="Number"
-                               Text="{Binding ReleaseTime.MinuteText, UpdateSourceTrigger=PropertyChanged}" />
-                    </StackPanel>
-                  </DataTemplate>
-                </DataGridTemplateColumn.CellTemplate>
-              </DataGridTemplateColumn>
-            </DataGrid.Columns>
-          </DataGrid>
-          <Button Grid.Row="4"
-                  Width="128"
-                  Height="36"
-                  HorizontalAlignment="Right"
-                  Command="{Binding SaveWeeklyScheduleCommand}"
-                  Content="설정 저장"
-                  FontWeight="SemiBold" />
-        </Grid>
+        <local:WeeklyScheduleView x:Name="WeeklyScheduleEditor" />
       </TabItem>
-
       <TabItem x:Name="EmergencyUnlockSettingsTab" Header="긴급 해제">
         <Grid Margin="22"
               IsEnabled="{Binding CanChangeUsagePolicySettings}">

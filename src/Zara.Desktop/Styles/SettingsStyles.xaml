@@ -1,0 +1,331 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <SolidColorBrush x:Key="Zara.Brush.Background" Color="#F5F6F8" />
+  <SolidColorBrush x:Key="Zara.Brush.Surface" Color="#FFFFFF" />
+  <SolidColorBrush x:Key="Zara.Brush.Text" Color="#18202C" />
+  <SolidColorBrush x:Key="Zara.Brush.Muted" Color="#576174" />
+  <SolidColorBrush x:Key="Zara.Brush.Border" Color="#DCE1E9" />
+  <SolidColorBrush x:Key="Zara.Brush.Accent" Color="#365BC5" />
+  <SolidColorBrush x:Key="Zara.Brush.AccentSoft" Color="#EDF2FF" />
+  <SolidColorBrush x:Key="Zara.Brush.Danger" Color="#B02727" />
+
+  <CornerRadius x:Key="Zara.Radius.Control">7</CornerRadius>
+  <CornerRadius x:Key="Zara.Radius.Input">6</CornerRadius>
+  <CornerRadius x:Key="Zara.Radius.Panel">10</CornerRadius>
+  <Thickness x:Key="Zara.Padding.Control">12,8</Thickness>
+  <Thickness x:Key="Zara.Padding.Panel">18</Thickness>
+  <FontFamily x:Key="Zara.Font.Family">Segoe UI, Malgun Gothic</FontFamily>
+
+  <Style x:Key="Zara.Button" TargetType="Button">
+    <Setter Property="Background" Value="{StaticResource Zara.Brush.Surface}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Zara.Brush.Border}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
+    <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Padding" Value="{StaticResource Zara.Padding.Control}" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Chrome"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{StaticResource Zara.Radius.Control}"
+                  SnapsToDevicePixels="True">
+            <ContentPresenter Margin="{TemplateBinding Padding}"
+                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                              RecognizesAccessKey="True" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="Chrome" Property="Opacity" Value="0.92" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Chrome" Property="Opacity" Value="0.82" />
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="Chrome" Property="BorderThickness" Value="2" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Chrome" Property="Opacity" Value="0.55" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="Zara.PrimaryButton" TargetType="Button" BasedOn="{StaticResource Zara.Button}">
+    <Setter Property="Background" Value="{StaticResource Zara.Brush.Accent}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Surface}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style x:Key="Zara.TimeButton" TargetType="ToggleButton">
+    <Setter Property="Background" Value="{StaticResource Zara.Brush.Surface}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Zara.Brush.Border}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
+    <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Padding" Value="12" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ToggleButton">
+          <Border x:Name="Chrome"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{StaticResource Zara.Radius.Control}"
+                  SnapsToDevicePixels="True">
+            <ContentPresenter Margin="{TemplateBinding Padding}"
+                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                              RecognizesAccessKey="True" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+            </Trigger>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Zara.Brush.AccentSoft}" />
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Chrome" Property="Opacity" Value="0.82" />
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="Chrome" Property="BorderThickness" Value="2" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Chrome" Property="Opacity" Value="0.55" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="Zara.TextBox" TargetType="TextBox">
+    <Setter Property="Background" Value="{StaticResource Zara.Brush.Background}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Zara.Brush.Border}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
+    <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Padding" Value="8" />
+    <Setter Property="MinHeight" Value="36" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+    <Setter Property="TextAlignment" Value="Center" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TextBox">
+          <Border x:Name="Chrome"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{StaticResource Zara.Radius.Input}"
+                  SnapsToDevicePixels="True">
+            <ScrollViewer x:Name="PART_ContentHost"
+                          Margin="{TemplateBinding Padding}"
+                          Focusable="False" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="Chrome" Property="BorderThickness" Value="2" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Chrome" Property="Opacity" Value="0.55" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="Zara.CheckBox" TargetType="CheckBox">
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
+    <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="VerticalContentAlignment" Value="Center" />
+  </Style>
+
+  <Style x:Key="Zara.Panel" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource Zara.Brush.Surface}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Zara.Brush.Border}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{StaticResource Zara.Radius.Panel}" />
+    <Setter Property="Padding" Value="{StaticResource Zara.Padding.Panel}" />
+  </Style>
+
+  <Style x:Key="Zara.DayItem" TargetType="ListBoxItem">
+    <Setter Property="Background" Value="{StaticResource Zara.Brush.Surface}" />
+    <Setter Property="BorderBrush" Value="{StaticResource Zara.Brush.Border}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
+    <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="Padding" Value="12" />
+    <Setter Property="Margin" Value="0,0,0,7" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ListBoxItem">
+          <Border x:Name="Chrome"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}"
+                  BorderThickness="{TemplateBinding BorderThickness}"
+                  CornerRadius="{StaticResource Zara.Radius.Control}"
+                  SnapsToDevicePixels="True">
+            <ContentPresenter Margin="{TemplateBinding Padding}"
+                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+            </Trigger>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Chrome" Property="Background" Value="{StaticResource Zara.Brush.AccentSoft}" />
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+            </Trigger>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+              <Setter TargetName="Chrome" Property="BorderThickness" Value="2" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="Chrome" Property="Opacity" Value="0.55" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="Zara.SliderTrackButton" TargetType="RepeatButton">
+    <Setter Property="Focusable" Value="False" />
+    <Setter Property="IsTabStop" Value="False" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="RepeatButton">
+          <Border Background="Transparent" />
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="Zara.SliderThumb" TargetType="Thumb">
+    <Setter Property="Width" Value="18" />
+    <Setter Property="Height" Value="18" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Thumb">
+          <Ellipse x:Name="ThumbShape"
+                   Width="18"
+                   Height="18"
+                   Fill="{StaticResource Zara.Brush.Accent}"
+                   SnapsToDevicePixels="True" />
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="ThumbShape" Property="Opacity" Value="0.85" />
+            </Trigger>
+            <Trigger Property="IsDragging" Value="True">
+              <Setter TargetName="ThumbShape" Property="Opacity" Value="0.72" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="Zara.Slider" TargetType="Slider">
+    <Setter Property="Height" Value="28" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Slider">
+          <Border x:Name="FocusOutline"
+                  Background="{TemplateBinding Background}"
+                  BorderBrush="Transparent"
+                  BorderThickness="1"
+                  CornerRadius="{StaticResource Zara.Radius.Control}">
+            <Grid>
+              <Border Height="4"
+                      Margin="9,0"
+                      Background="{StaticResource Zara.Brush.Border}"
+                      CornerRadius="2"
+                      VerticalAlignment="Center" />
+              <Track x:Name="PART_Track"
+                     Minimum="{TemplateBinding Minimum}"
+                     Maximum="{TemplateBinding Maximum}"
+                     Value="{TemplateBinding Value}"
+                     IsDirectionReversed="{TemplateBinding IsDirectionReversed}">
+                <Track.DecreaseRepeatButton>
+                  <RepeatButton Command="Slider.DecreaseLarge"
+                                Style="{StaticResource Zara.SliderTrackButton}" />
+                </Track.DecreaseRepeatButton>
+                <Track.Thumb>
+                  <Thumb Style="{StaticResource Zara.SliderThumb}" />
+                </Track.Thumb>
+                <Track.IncreaseRepeatButton>
+                  <RepeatButton Command="Slider.IncreaseLarge"
+                                Style="{StaticResource Zara.SliderTrackButton}" />
+                </Track.IncreaseRepeatButton>
+              </Track>
+            </Grid>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocused" Value="True">
+              <Setter TargetName="FocusOutline" Property="BorderBrush" Value="{StaticResource Zara.Brush.Accent}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter TargetName="FocusOutline" Property="Opacity" Value="0.55" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="Zara.Heading" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
+    <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
+    <Setter Property="FontSize" Value="16" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style x:Key="Zara.SecondaryText" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Muted}" />
+    <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
+    <Setter Property="FontSize" Value="12" />
+  </Style>
+
+  <Style x:Key="Zara.TimeText" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
+    <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
+    <Setter Property="FontSize" Value="26" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <Style x:Key="Zara.ErrorText" TargetType="TextBlock">
+    <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Danger}" />
+    <Setter Property="FontFamily" Value="{StaticResource Zara.Font.Family}" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="TextWrapping" Value="Wrap" />
+  </Style>
+</ResourceDictionary>

@@ -1,5 +1,7 @@
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
+using System.Windows.Threading;
 using Zara.Application.UsagePolicy;
 using Zara.Core.UsagePolicy;
 using Zara.Desktop.ViewModels;
@@ -34,18 +36,13 @@ public sealed class MainWindowScheduleBindingTests
         try
         {
             window.MainTabs.SelectedIndex = 1;
+            viewModel.SelectedWeekday = wednesday;
             window.Show();
-            window.WeekdayRestrictionsGrid.BringIntoView();
-            window.WeekdayRestrictionsGrid.ScrollIntoView(wednesday);
-            window.WeekdayRestrictionsGrid.UpdateLayout();
-            var column = (DataGridTemplateColumn)window.WeekdayRestrictionsGrid.Columns[1];
-            var row = (DataGridRow)window.WeekdayRestrictionsGrid.ItemContainerGenerator
-                .ContainerFromItem(wednesday);
-            var presenter = FindVisualChild<DataGridCellsPresenter>(row);
-            var cell = (DataGridCell)presenter.ItemContainerGenerator.ContainerFromIndex(1);
-            var checkBox = FindVisualChild<CheckBox>(cell);
+            window.UpdateLayout();
+            CheckBox checkBox = window.WeeklyScheduleEditor.EnabledCheckBox;
 
             Assert.IsTrue(checkBox.IsChecked);
+            Assert.AreEqual("활성화", checkBox.Content);
 
             checkBox.IsChecked = false;
 
@@ -90,7 +87,7 @@ public sealed class MainWindowScheduleBindingTests
 
             window.MainTabs.SelectedIndex = 2;
 
-            Assert.AreEqual("9", monday.StartTime.HourText);
+            Assert.AreEqual("09", monday.StartTime.HourText);
             viewModel.EmergencyDurationMinutesText = "99";
 
             window.MainTabs.SelectedIndex = 1;
@@ -188,6 +185,165 @@ public sealed class MainWindowScheduleBindingTests
         }
     }
 
+    [STATestMethod]
+    public async Task DisplayedEveningInputsArePersistedWithoutMovingFocusOrCommittingARow()
+    {
+        var store = new InMemoryStore(UsagePolicySettings.Default);
+        using var runtime = new UsagePolicyRuntime(store, new NoOpLockPort(), new EmptyPromptCatalog(),
+            new FixedTimeProvider());
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        var editor = new WeeklyScheduleView { DataContext = viewModel };
+        var window = new Window
+        {
+            Content = editor,
+            Left = -10_000,
+            Top = -10_000,
+            Width = 900,
+            Height = 600,
+            ShowActivated = false,
+            ShowInTaskbar = false,
+        };
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+            editor.EnabledCheckBox.SetCurrentValue(ToggleButton.IsCheckedProperty, true);
+            editor.HourInput.SetCurrentValue(TextBox.TextProperty, "19");
+            editor.MinuteInput.SetCurrentValue(TextBox.TextProperty, "30");
+            editor.ReleaseTimeButton.SetCurrentValue(ToggleButton.IsCheckedProperty, true);
+            DrainBindings(window);
+            editor.HourInput.SetCurrentValue(TextBox.TextProperty, "19");
+            editor.MinuteInput.SetCurrentValue(TextBox.TextProperty, "31");
+
+            Assert.AreEqual(new TimeOnly(19, 30), viewModel.SelectedWeekday.StartTime.ToTimeOnly());
+            Assert.AreEqual(new TimeOnly(19, 31), viewModel.SelectedWeekday.ReleaseTime.ToTimeOnly());
+            Assert.IsFalse(viewModel.WillLockImmediately);
+            await viewModel.SaveWeeklyScheduleAsync();
+
+            Assert.AreEqual(new TimeOnly(19, 30), store.Settings.WeeklySchedule.Wednesday.StartTime);
+            Assert.AreEqual(new TimeOnly(19, 31), store.Settings.WeeklySchedule.Wednesday.ReleaseTime);
+            Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
+            Assert.IsFalse(viewModel.HasWeeklyScheduleChanges);
+            Assert.AreEqual("19:30", viewModel.SelectedWeekday.StartTime.DisplayTime);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [STATestMethod]
+    public async Task SliderAndAdjustmentUpdateInputsAndInvalidInputCannotBeSaved()
+    {
+        var settings = UsagePolicySettings.Default.WithWeeklySchedule(
+            WeeklyUsageRestrictionSchedule.Default.WithRestriction(DayOfWeek.Wednesday,
+                new DailyUsageRestriction(true, new TimeOnly(19, 30), new TimeOnly(21, 0))));
+        using var runtime = new UsagePolicyRuntime(new InMemoryStore(settings), new NoOpLockPort(),
+            new EmptyPromptCatalog(), new FixedTimeProvider());
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        var window = CreateWindow(viewModel);
+        try
+        {
+            window.MainTabs.SelectedIndex = 1;
+            window.Show();
+            window.UpdateLayout();
+            WeeklyScheduleView editor = window.WeeklyScheduleEditor;
+            editor.TimeSlider.SetCurrentValue(RangeBase.ValueProperty, 1171d);
+            DrainBindings(window);
+            Assert.AreEqual("19", editor.HourInput.Text);
+            Assert.AreEqual("31", editor.MinuteInput.Text);
+            viewModel.SelectedWeekday.LaterHalfHourCommand.Execute(null);
+            DrainBindings(window);
+            Assert.AreEqual("20", editor.HourInput.Text);
+            Assert.AreEqual("01", editor.MinuteInput.Text);
+            Assert.AreEqual(1201d, editor.TimeSlider.Value);
+
+            editor.HourInput.SetCurrentValue(TextBox.TextProperty, "24");
+            DrainBindings(window);
+            Assert.AreEqual("24", editor.HourInput.Text);
+            Assert.AreEqual(1201d, editor.TimeSlider.Value);
+            Assert.IsFalse(viewModel.SaveWeeklyScheduleCommand.CanExecute(null));
+            Assert.Contains("수요일 시작 시각", viewModel.WeeklyScheduleValidationMessage);
+            editor.HourInput.SetCurrentValue(TextBox.TextProperty, string.Empty);
+            DrainBindings(window);
+            Assert.AreEqual(string.Empty, editor.HourInput.Text);
+            Assert.AreEqual(1201d, editor.TimeSlider.Value);
+            viewModel.RevertWeekdayCommand.Execute(null);
+            DrainBindings(window);
+            Assert.AreEqual("19", editor.HourInput.Text);
+            Assert.AreEqual("30", editor.MinuteInput.Text);
+            Assert.AreEqual(1170d, editor.TimeSlider.Value);
+            Assert.IsTrue(viewModel.SaveWeeklyScheduleCommand.CanExecute(null));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [STATestMethod]
+    [DataRow(820d, 620d)]
+    [DataRow(980d, 720d)]
+    public async Task ScheduleInputsAndSaveActionsFitTheSupportedWindowSizes(double width, double height)
+    {
+        using var runtime = new UsagePolicyRuntime(new InMemoryStore(UsagePolicySettings.Default),
+            new NoOpLockPort(), new EmptyPromptCatalog(), new FixedTimeProvider());
+        await runtime.InitializeAsync();
+        using var viewModel = CreateViewModel(runtime);
+        var window = CreateWindow(viewModel);
+        window.Width = width;
+        window.Height = height;
+        try
+        {
+            window.MainTabs.SelectedIndex = 1;
+            window.Show();
+            DailyUsageRestrictionViewModel wednesday = viewModel.SelectedWeekday;
+            wednesday.StartTime.Set(new TimeOnly(19, 0));
+            wednesday.ReleaseTime.Set(new TimeOnly(19, 31));
+            wednesday.IsRestrictionEnabled = true;
+            await viewModel.SaveWeeklyScheduleAsync();
+            DrainBindings(window);
+            window.UpdateLayout();
+            WeeklyScheduleView editor = window.WeeklyScheduleEditor;
+
+            Assert.IsTrue(viewModel.IsWeeklyScheduleConfirmationVisible);
+            Assert.IsTrue(editor.ConfirmSaveButton.IsVisible);
+            Assert.AreEqual(FontWeights.Bold, editor.ImpactText.FontWeight);
+            AssertContained(editor.SaveButton, editor);
+            AssertContained(editor.ConfirmSaveButton, editor);
+
+            editor.HourInput.BringIntoView();
+            window.UpdateLayout();
+            AssertContained(editor.HourInput, editor);
+            AssertContained(editor.MinuteInput, editor);
+            AssertContained(editor.TimeSlider, editor);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    private static void AssertContained(FrameworkElement element, FrameworkElement container)
+    {
+        Rect bounds = element.TransformToAncestor(container).TransformBounds(new Rect(element.RenderSize));
+        Assert.IsTrue(element.ActualWidth > 0 && element.ActualHeight > 0);
+        Assert.IsTrue(bounds.Left >= 0 && bounds.Top >= 0 &&
+            bounds.Right <= container.ActualWidth && bounds.Bottom <= container.ActualHeight,
+            $"{element.Name} bounds {bounds} exceed {container.RenderSize}.");
+    }
+
+    private static void DrainBindings(Window window) =>
+        window.Dispatcher.Invoke(() => { }, DispatcherPriority.DataBind);
+
+    private sealed class FixedTimeProvider : TimeProvider
+    {
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+        public override DateTimeOffset GetUtcNow() => new(2026, 9, 23, 19, 26, 0, TimeSpan.Zero);
+    }
+
     private static MainWindow CreateWindow(MainWindowViewModel viewModel) =>
         new(viewModel)
         {
@@ -218,6 +374,7 @@ public sealed class MainWindowScheduleBindingTests
     private sealed class InMemoryStore(UsagePolicySettings settings) : IUsagePolicySettingsStore
     {
         private UsagePolicySettings _settings = settings;
+        internal UsagePolicySettings Settings => _settings;
 
         public Task<UsagePolicySettings> LoadAsync(
             CancellationToken cancellationToken = default) =>

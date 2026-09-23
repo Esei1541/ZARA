@@ -167,6 +167,35 @@ public sealed class UsagePolicyRuntime : IDisposable
     /// </summary>
     public Task UpdateWeeklyScheduleAsync(
         WeeklyUsageRestrictionSchedule weeklySchedule,
+        CancellationToken cancellationToken = default) =>
+        TryUpdateWeeklyScheduleAsync(weeklySchedule, immediateLockConfirmed: true, cancellationToken);
+
+    /// <summary>
+    /// Previews a draft against the same immutable time and exception snapshot used by the UI.
+    /// Saving checks time again inside the serialized operation.
+    /// </summary>
+    public UsagePolicyRuntimeSnapshot PreviewWeeklySchedule(WeeklyUsageRestrictionSchedule weeklySchedule)
+    {
+        ArgumentNullException.ThrowIfNull(weeklySchedule);
+        UsagePolicyRuntimeSnapshot snapshot = CurrentSnapshot;
+        UsagePolicySettings settings = snapshot.Settings.WithWeeklySchedule(weeklySchedule);
+        return snapshot with
+        {
+            Settings = settings,
+            Evaluation = UsagePolicyEvaluator.Evaluate(
+                settings, snapshot.EvaluatedLocalTime, snapshot.Evaluation.HasActiveEmergencyUnlock),
+            NextLockStartLocalTime = UsagePolicyEvaluator.FindNextLockStart(
+                settings, snapshot.EvaluatedLocalTime, snapshot.EmergencyUnlockEndLocalTime),
+        };
+    }
+
+    /// <summary>
+    /// Saves the exact draft, or returns false without saving when an immediate lock needs consent.
+    /// The check includes reservations and emergency unlocks and runs after waiting for other writes.
+    /// </summary>
+    public Task<bool> TryUpdateWeeklyScheduleAsync(
+        WeeklyUsageRestrictionSchedule weeklySchedule,
+        bool immediateLockConfirmed,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(weeklySchedule);
@@ -181,7 +210,14 @@ public sealed class UsagePolicyRuntime : IDisposable
                     current.EmergencyUnlock,
                     current.Reservations,
                     current.EmergencyUnlockUsage);
+                if (!immediateLockConfirmed && CreateSnapshot(updated).Evaluation.LockRequired)
+                {
+                    PublishSnapshotIfChanged(current);
+                    return false;
+                }
+
                 await PersistAndApplyAsync(updated, cancellationToken).ConfigureAwait(false);
+                return true;
             },
             cancellationToken);
     }

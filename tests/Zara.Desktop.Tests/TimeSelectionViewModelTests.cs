@@ -6,6 +6,40 @@ namespace Zara.Desktop.Tests;
 public sealed class TimeSelectionViewModelTests
 {
     [TestMethod]
+    [DataRow(0, 0)]
+    [DataRow(12, 0)]
+    [DataRow(19, 30)]
+    [DataRow(23, 59)]
+    public void TwentyFourHourInputAndSliderRepresentTheSameMinute(int hour, int minute)
+    {
+        var viewModel = new TimeSelectionViewModel(use24HourClock: true);
+        var expected = new TimeOnly(hour, minute);
+        viewModel.Set(expected);
+        Assert.AreEqual(expected, viewModel.ToTimeOnly());
+        Assert.AreEqual(hour * 60d + minute, viewModel.MinutesSinceMidnight);
+        viewModel.MinutesSinceMidnight = 1171;
+        Assert.AreEqual("19", viewModel.HourText);
+        Assert.AreEqual("31", viewModel.MinuteText);
+    }
+
+    [TestMethod]
+    [DataRow("24", "00")]
+    [DataRow("23", "60")]
+    [DataRow("", "30")]
+    public void InvalidTwentyFourHourInputIsRetainedAndNeverConvertedToAnotherTime(string hour, string minute)
+    {
+        var viewModel = new TimeSelectionViewModel(use24HourClock: true)
+        {
+            HourText = hour,
+            MinuteText = minute,
+        };
+        Assert.IsFalse(viewModel.IsValid);
+        Assert.AreEqual(hour, viewModel.HourText);
+        Assert.AreEqual(minute, viewModel.MinuteText);
+        Assert.ThrowsExactly<ArgumentException>(() => viewModel.ToTimeOnly());
+    }
+
+    [TestMethod]
     public void DirectTextInputConvertsTwelveHourClockBoundaries()
     {
         var viewModel = new TimeSelectionViewModel
