@@ -1,6 +1,11 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+#if LOCAL_BUILD_UPDATES
+using Microsoft.Win32;
+using Zara.Application.LocalBuilds;
+using Zara.Desktop.LocalBuilds;
+#endif
 using Zara.Application.UsagePolicy;
 using Zara.Core.UsagePolicy;
 using Zara.Desktop.ViewModels;
@@ -10,15 +15,45 @@ using Button = System.Windows.Controls.Button;
 
 namespace Zara.Desktop;
 
+#if LOCAL_BUILD_UPDATES
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "The WPF window owns the build view model and disposes it in OnClosed.")]
+#endif
 public partial class MainWindow : Window
 {
     private readonly MainWindowViewModel _viewModel;
+#if LOCAL_BUILD_UPDATES
+    private readonly LocalBuildViewModel? _localBuildViewModel;
+    private readonly TabItem? _localBuildTab;
+#endif
 
-    internal MainWindow(MainWindowViewModel viewModel)
+    internal MainWindow(
+        MainWindowViewModel viewModel
+#if LOCAL_BUILD_UPDATES
+        , ILocalBuildUpdates? localBuildUpdates = null
+#endif
+        )
     {
         _viewModel = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
         InitializeComponent();
         DataContext = _viewModel;
+#if LOCAL_BUILD_UPDATES
+        if (localBuildUpdates is not null)
+        {
+            _localBuildViewModel = new LocalBuildViewModel(
+                localBuildUpdates,
+                SelectLocalBuildDirectory,
+                ConfirmLocalBuildInstall);
+            _localBuildTab = new TabItem
+            {
+                Header = "빌드",
+                Content = new LocalBuildView(_localBuildViewModel),
+            };
+            MainTabs.Items.Add(_localBuildTab);
+        }
+#endif
 #if DEBUG
         ShellActions.Children.Add(new Button
         {
@@ -58,11 +93,18 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _viewModel.NotificationRequested -= OnNotificationRequested;
+#if LOCAL_BUILD_UPDATES
+        _localBuildViewModel?.Dispose();
+#endif
         _viewModel.Dispose();
         base.OnClosed(e);
     }
 
+#if LOCAL_BUILD_UPDATES
+    private async void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+#else
     private void MainTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+#endif
     {
         if (!ReferenceEquals(e.OriginalSource, MainTabs))
         {
@@ -80,7 +122,50 @@ public partial class MainWindow : Window
                 _viewModel.ResetEmergencyUnlockEdits();
             }
         }
+
+#if LOCAL_BUILD_UPDATES
+        foreach (object addedItem in e.AddedItems)
+        {
+            if (ReferenceEquals(addedItem, _localBuildTab) && _localBuildViewModel is not null)
+            {
+                await _localBuildViewModel.EnterAsync().ConfigureAwait(true);
+            }
+        }
+#endif
     }
+
+#if LOCAL_BUILD_UPDATES
+    private string? SelectLocalBuildDirectory(string currentDirectory)
+    {
+        var dialog = new OpenFolderDialog
+        {
+            Title = "로컬 빌드 폴더 선택",
+            Multiselect = false,
+        };
+        if (!string.IsNullOrWhiteSpace(currentDirectory))
+        {
+            dialog.InitialDirectory = currentDirectory;
+        }
+
+        return dialog.ShowDialog(this) == true ? dialog.FolderName : null;
+    }
+
+    private bool ConfirmLocalBuildInstall(LocalBuildItemViewModel build)
+    {
+        MessageBoxResult result = System.Windows.MessageBox.Show(
+            this,
+            "선택한 빌드로 ZARA를 업데이트하시겠습니까?\n\n" +
+            $"버전: {build.VersionName}\n" +
+            $"구성: {build.Configuration}\n" +
+            $"빌드: {build.BuildId}\n\n" +
+            "설치 관리자를 시작하면 ZARA가 종료되고 업데이트 후 다시 시작됩니다.",
+            "로컬 빌드 업데이트",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning,
+            MessageBoxResult.No);
+        return result == MessageBoxResult.Yes;
+    }
+#endif
 
     private void OnNotificationRequested(
         object? sender,

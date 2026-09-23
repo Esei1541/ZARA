@@ -7,6 +7,9 @@
 #ifndef OutputDir
   #error OutputDir is required. Use Build-Installer.ps1.
 #endif
+#ifndef OutputBaseFilename
+  #error OutputBaseFilename is required. Use Build-Installer.ps1.
+#endif
 
 [Setup]
 AppId={{1B6D4754-0971-4A21-971B-69EB363A2A27}
@@ -26,7 +29,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.22000
 OutputDir={#OutputDir}
-OutputBaseFilename=ZARA-{#AppVersion}-win-x64-Setup
+OutputBaseFilename={#OutputBaseFilename}
 SetupIconFile=..\src\Zara.Desktop\Assets\ZaraShellIcon.ico
 UninstallDisplayIcon={app}\Zara.Desktop.exe
 Compression=lzma2
@@ -51,6 +54,12 @@ Source: "Manage-Installation.ps1"; Flags: dontcopy
 Source: "{#PayloadDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; The final file callback runs inside Inno's install transaction, so startup failure fails installation.
 Source: "Manage-Installation.ps1"; DestDir: "{app}"; Flags: ignoreversion; AfterInstall: StartInstalledService
+
+#ifndef LocalBuild
+[InstallDelete]
+; A Release update must not retain the identity of an earlier local build.
+Type: files; Name: "{app}\local-build.json"
+#endif
 
 [Icons]
 Name: "{autoprograms}\ZARA"; Filename: "{app}\Zara.Desktop.exe"; WorkingDir: "{app}"

@@ -1,6 +1,7 @@
 <Project>
   <PropertyGroup>
     <Version>1.0.1</Version>
+    <Configurations>Debug;Release;Staging</Configurations>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -11,5 +12,12 @@
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <RestoreLockedMode Condition="'$(ContinuousIntegrationBuild)' == 'true'">true</RestoreLockedMode>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug' Or '$(Configuration)' == 'Staging'">
+    <DefineConstants>$(DefineConstants);LOCAL_BUILD_UPDATES</DefineConstants>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Staging'">
+    <Optimize>true</Optimize>
+    <DefineConstants>$(DefineConstants);STAGING</DefineConstants>
   </PropertyGroup>
 </Project>

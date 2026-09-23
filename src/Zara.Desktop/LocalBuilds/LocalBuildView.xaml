@@ -1,0 +1,106 @@
+<UserControl x:Class="Zara.Desktop.LocalBuilds.LocalBuildView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:ClassModifier="internal">
+  <Grid Margin="22">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="16" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="12" />
+      <RowDefinition Height="*" />
+      <RowDefinition Height="12" />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <Border Padding="14"
+            Background="#FFFFFFFF"
+            BorderBrush="#FFD7DCE3"
+            BorderThickness="1"
+            CornerRadius="8">
+      <TextBlock Text="{Binding CurrentBuildText}"
+                 TextWrapping="Wrap" />
+    </Border>
+
+    <Grid Grid.Row="2">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <TextBox Height="32"
+               Padding="8,4"
+               IsReadOnly="True"
+               Text="{Binding BuildsDirectory, Mode=OneWay}" />
+      <Button Grid.Column="1"
+              Width="104"
+              Height="32"
+              Margin="8,0,0,0"
+              Command="{Binding ChangeDirectoryCommand}"
+              Content="폴더 선택" />
+      <Button Grid.Column="2"
+              Width="88"
+              Height="32"
+              Margin="8,0,0,0"
+              Command="{Binding RefreshCommand}"
+              Content="새로고침" />
+    </Grid>
+
+    <DataGrid Grid.Row="4"
+              AutoGenerateColumns="False"
+              CanUserAddRows="False"
+              CanUserDeleteRows="False"
+              CanUserReorderColumns="False"
+              CanUserResizeRows="False"
+              CanUserSortColumns="False"
+              HeadersVisibility="Column"
+              IsEnabled="{Binding CanInteract}"
+              IsReadOnly="True"
+              ItemsSource="{Binding Builds}"
+              SelectedItem="{Binding SelectedBuild, Mode=TwoWay}">
+      <DataGrid.Columns>
+        <DataGridTextColumn Width="58" Binding="{Binding CurrentMarker}" Header="상태" />
+        <DataGridTextColumn Width="90" Binding="{Binding VersionName}" Header="버전" />
+        <DataGridTextColumn Width="86" Binding="{Binding Configuration}" Header="구성" />
+        <DataGridTextColumn Width="150" Binding="{Binding BuildId}" Header="빌드" />
+        <DataGridTextColumn Width="142" Binding="{Binding CreatedAtText}" Header="생성 시각" />
+        <DataGridTextColumn Width="120" Binding="{Binding Branch}" Header="브랜치" />
+        <DataGridTextColumn Width="100" Binding="{Binding Commit}" Header="커밋" />
+        <DataGridTextColumn Width="2*"
+                            MinWidth="180"
+                            Binding="{Binding Problem}"
+                            Header="상태 설명">
+          <DataGridTextColumn.ElementStyle>
+            <Style TargetType="TextBlock">
+              <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+              <Setter Property="ToolTip" Value="{Binding Problem}" />
+            </Style>
+          </DataGridTextColumn.ElementStyle>
+        </DataGridTextColumn>
+      </DataGrid.Columns>
+    </DataGrid>
+
+    <Grid Grid.Row="6">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="*" />
+        <ColumnDefinition Width="Auto" />
+      </Grid.ColumnDefinitions>
+      <StackPanel VerticalAlignment="Center">
+        <TextBlock Foreground="#FF5C6470"
+                   Text="{Binding StatusMessage}"
+                   TextWrapping="Wrap" />
+        <TextBlock Margin="0,4,0,0"
+                   Foreground="#FFB42318"
+                   Text="{Binding ErrorMessage}"
+                   TextWrapping="Wrap" />
+      </StackPanel>
+      <Button Grid.Column="1"
+              Width="168"
+              Height="36"
+              Margin="16,0,0,0"
+              Command="{Binding InstallSelectedBuildCommand}"
+              Content="선택 빌드로 업데이트"
+              FontWeight="SemiBold" />
+    </Grid>
+  </Grid>
+</UserControl>
