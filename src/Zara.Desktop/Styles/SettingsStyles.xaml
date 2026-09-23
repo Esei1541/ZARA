@@ -304,7 +304,6 @@
               <Setter TargetName="HeaderPresenter" Property="TextElement.FontWeight" Value="SemiBold" />
             </Trigger>
             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="HeaderPresenter" Property="TextElement.Foreground" Value="{StaticResource Zara.Brush.Text}" /></Trigger>
-            <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Underline" Property="Background" Value="{StaticResource Zara.Brush.AccentSoft}" /></Trigger>
           </ControlTemplate.Triggers>
         </ControlTemplate>
       </Setter.Value>
