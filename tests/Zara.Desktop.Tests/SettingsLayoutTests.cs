@@ -12,6 +12,26 @@ namespace Zara.Desktop.Tests;
 public sealed class SettingsLayoutTests
 {
     [STATestMethod]
+    public void LockedWeekdayListKeepsItsTransparentBackground()
+    {
+        var window = CreateWindow();
+        try
+        {
+            window.MainTabs.SelectedIndex = 1;
+            window.Show();
+            window.UpdateLayout();
+            ListBox list = window.WeeklyScheduleEditor.WeekdayList;
+            Assert.IsFalse(list.IsEnabled);
+            Border chrome = Descendants<Border>(list).First();
+            Assert.AreEqual(Colors.Transparent, ((SolidColorBrush)chrome.Background).Color);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [STATestMethod]
     [DataRow(820d)]
     [DataRow(980d)]
     [DataRow(1220d)]
