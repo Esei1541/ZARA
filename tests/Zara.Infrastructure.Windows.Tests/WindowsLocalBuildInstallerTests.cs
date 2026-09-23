@@ -1,6 +1,7 @@
 #if LOCAL_BUILD_UPDATES
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Zara.Infrastructure.Windows.LocalBuilds;
 
 namespace Zara.Infrastructure.Windows.Tests;
@@ -39,6 +40,40 @@ public sealed class WindowsLocalBuildInstallerTests
     {
         var installer = new WindowsLocalBuildInstaller(_ => throw new Win32Exception(2));
         await Assert.ThrowsExactlyAsync<Win32Exception>(() => installer.LaunchAsync(@"C:\build.exe"));
+    }
+
+    [TestMethod]
+    public async Task ShellRequestRunsInAnStaApartment()
+    {
+        ApartmentState? apartment = null;
+        var installer = new WindowsLocalBuildInstaller(_ =>
+        {
+            apartment = Thread.CurrentThread.GetApartmentState();
+            return true;
+        });
+
+        Assert.IsTrue(await installer.LaunchAsync(@"C:\build.exe"));
+        Assert.AreEqual(ApartmentState.STA, apartment);
+    }
+
+    [TestMethod]
+    public async Task ReportedComElevationCancellationIsNotReportedAsSuccess()
+    {
+        var installer = new WindowsLocalBuildInstaller(
+            _ => throw Marshal.GetExceptionForHR(unchecked((int)0x800704C7), new IntPtr(-1))!);
+
+        Assert.IsFalse(await installer.LaunchAsync(@"C:\build.exe"));
+    }
+
+    [TestMethod]
+    public async Task ExplorerFailureReachesTheCaller()
+    {
+        var failure = Marshal.GetExceptionForHR(unchecked((int)0x80010108), new IntPtr(-1))!;
+        var installer = new WindowsLocalBuildInstaller(_ => throw failure);
+
+        var actual = await Assert.ThrowsExactlyAsync<COMException>(
+            () => installer.LaunchAsync(@"C:\build.exe"));
+        Assert.AreSame(failure, actual);
     }
 
     [TestMethod]

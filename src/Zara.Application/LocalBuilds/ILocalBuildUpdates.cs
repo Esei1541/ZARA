@@ -8,7 +8,7 @@ public interface ILocalBuildUpdates
 
     Task ChangeDirectoryAsync(string directory, CancellationToken cancellationToken = default);
 
-    /// <returns>True only when the installer started; false when elevation was canceled.</returns>
+    /// <returns>True when Windows accepted the launch request; false when it reported cancellation.</returns>
     Task<bool> InstallAsync(string buildId, CancellationToken cancellationToken = default);
 }
 #endif

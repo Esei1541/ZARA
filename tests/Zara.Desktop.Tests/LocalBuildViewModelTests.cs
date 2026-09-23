@@ -89,7 +89,7 @@ public sealed class LocalBuildViewModelTests
     }
 
     [TestMethod]
-    public async Task InstallAllowsAnotherBuildWithTheSameVersionAndReportsOnlyInstallerStart()
+    public async Task InstallAllowsAnotherBuildWithTheSameVersionAndReportsOnlyTheLaunchRequest()
     {
         LocalBuildInfo current = Build("current", "1.0.1", "Staging", minute: 2);
         LocalBuildInfo previous = Build("previous", "1.0.1", "Debug", minute: 1);
@@ -119,7 +119,7 @@ public sealed class LocalBuildViewModelTests
         Assert.AreSame(viewModel.Builds[0], confirmedBuild);
         Assert.HasCount(1, updates.InstalledBuildIds);
         Assert.AreEqual("previous", updates.InstalledBuildIds[0]);
-        StringAssert.Contains(viewModel.StatusMessage, "설치 관리자를 시작했습니다");
+        StringAssert.Contains(viewModel.StatusMessage, "Windows에 설치 실행을 요청했습니다");
         Assert.IsFalse(viewModel.StatusMessage!.Contains("완료", StringComparison.Ordinal));
     }
 

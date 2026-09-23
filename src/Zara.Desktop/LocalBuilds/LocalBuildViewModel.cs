@@ -204,7 +204,7 @@ internal sealed class LocalBuildViewModel : INotifyPropertyChanged, IDisposable
             }
 
             StatusMessage = started
-                ? "업데이트 설치 관리자를 시작했습니다. ZARA가 종료된 뒤 업데이트되고 다시 시작됩니다."
+                ? "Windows에 설치 실행을 요청했습니다. 관리자 권한 요청과 설치 창을 확인하십시오. 설치가 진행되면 ZARA가 종료되고 업데이트 후 다시 시작됩니다."
                 : "관리자 권한 요청이 취소되어 업데이트를 시작하지 않았습니다.";
         }
         catch (OperationCanceledException) when (IsDisposed)
