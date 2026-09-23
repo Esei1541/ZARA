@@ -57,7 +57,6 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
     private bool _exitRequestInProgress;
     private CancellationTokenSource? _trayExitCancellation;
     private bool _systemEventsSubscribed;
-    private bool _externalActivationRequested;
     private CancellationTokenSource? _systemShutdownWatchdog;
     private int _usagePolicyRefreshInProgress;
     private int _disposeState;
@@ -83,7 +82,14 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         catch (Exception exception)
         {
             Trace.TraceError("ZARA desktop initialization failed: {0}", exception);
+            bool cancelled = _startupCancellation?.IsCancellationRequested == true;
             DisposeOwnedResources();
+            if (e.Args.Length == 0 && !cancelled)
+            {
+                StartupFailurePresentation failure = StartupFailurePresentation.FromException(exception);
+                _ = System.Windows.MessageBox.Show($"{failure.Message}\n\n{failure.Details}", "ZARA 시작 오류",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
             Shutdown(exitCode: 1);
         }
     }
@@ -134,49 +140,34 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         window.Activate();
     }
 
-    private Task RequestExternalActivationAsync()
+    private async Task RequestExternalActivationAsync()
     {
+        // An acknowledgement means initialization and the healthy report actually completed.
+        await _startupReady.Task.ConfigureAwait(false);
         if (Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished)
         {
-            return Task.CompletedTask;
+            throw new InvalidOperationException("ZARA is shutting down.");
         }
-
-        return Dispatcher.InvokeAsync(() =>
+        await Dispatcher.InvokeAsync(() =>
         {
             if (IsShuttingDown)
             {
-                return;
+                throw new InvalidOperationException("ZARA is shutting down.");
             }
-
-            if (_mainWindowViewModel is null)
-            {
-                _externalActivationRequested = true;
-                return;
-            }
-
             ShowMainWindow();
-        }).Task;
+        }).Task.ConfigureAwait(false);
     }
-
     private async Task InitializeAsync(IReadOnlyList<string> arguments)
     {
         string? launchToken = ParseServiceLaunchToken(arguments);
 
-        _settingsStore = new WindowsDesktopRestartSettingsStore();
-        _restartSettings = await _settingsStore.LoadAsync().ConfigureAwait(true);
-
-        RestartContinuityDecision initialDecision = RestartContinuityPolicy.Decide(
-            lockRequired: false,
-            _restartSettings.RestartOnExitWhenUnlocked);
-        var initialLease = new SupervisionLease(
-            Revision: 0,
-            RestartRequiredAfterExit: initialDecision.RestartRequired,
-            RecoverLockOnRestart: initialDecision.RecoverLock);
-        _supervisionConnection = await WindowsSupervisionConnection
-            .ConnectAsync(launchToken, initialLease)
-            .ConfigureAwait(true);
+        if (!await EstablishSupervisionAsync(launchToken).ConfigureAwait(true))
+        {
+            Shutdown();
+            return;
+        }
         _restartContinuity = new RestartContinuityUseCase(
-            _supervisionConnection,
+            _supervisionConnection!,
             _restartSettings.RestartOnExitWhenUnlocked);
 
         _displayTopology = new WindowsDisplayTopology();
@@ -184,7 +175,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             Dispatcher,
             _displayTopology,
             new NativeWindowPositioner());
-        _lockInputPort = new WindowsLockInputPort(_supervisionConnection);
+        _lockInputPort = new WindowsLockInputPort(_supervisionConnection!);
         _lockRuntime = new LockRuntimeUseCase(_overlayPort, _lockInputPort);
         _lockRuntime.RecoveryStateChanged += OnLockRecoveryStateChanged;
         _systemShutdown = new SystemShutdownUseCase(
@@ -202,7 +193,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         _applicationIcon = LoadApplicationIcon();
         _trayIcon = CreateTrayIcon(_applicationIcon);
 
-        bool recoverLock = _supervisionConnection.Registration.RecoverLockOnStart;
+        bool recoverLock = _supervisionConnection!.Registration.RecoverLockOnStart;
         RestartContinuityLease acknowledgedLease = await _restartContinuity
             .PublishLockConditionAsync(recoverLock)
             .ConfigureAwait(true);
@@ -248,9 +239,11 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             .ReportHealthyAsync(acknowledgedLease.Revision)
             .ConfigureAwait(true);
 
-        if (launchToken is null || _externalActivationRequested)
+        _startupReady.TrySetResult();
+        CompleteStartupPresentation();
+
+        if (launchToken is null)
         {
-            _externalActivationRequested = false;
             ShowMainWindow();
         }
     }
@@ -1040,6 +1033,7 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             return;
         }
 
+        DisposeStartupResources();
         CancelSystemShutdownWatchdog();
         UnsubscribeUsagePolicyNotifications();
         StopLockReminders();

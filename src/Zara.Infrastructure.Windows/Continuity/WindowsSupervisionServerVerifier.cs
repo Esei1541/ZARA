@@ -132,15 +132,34 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
                 "The supervision pipe server did not match the SCM Service process.");
         }
 
-        if (identity.ServiceType != ServiceWin32OwnProcess ||
-            identity.ConfiguredServiceType != ServiceWin32OwnProcess)
+        if (identity.ServiceType != ServiceWin32OwnProcess)
+        {
+            throw new InvalidDataException(
+                "The registered ZARA Service was not a non-interactive dedicated process.");
+        }
+
+        ValidateRegisteredServiceConfiguration(
+            identity.ConfiguredServiceType,
+            identity.ServiceAccountName,
+            identity.ServiceBinaryPath,
+            expectedServicePath);
+    }
+
+    internal static void ValidateRegisteredServiceConfiguration(
+        uint configuredServiceType,
+        string accountName,
+        string binaryPath,
+        string expectedServicePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(expectedServicePath);
+        if (configuredServiceType != ServiceWin32OwnProcess)
         {
             throw new InvalidDataException(
                 "The registered ZARA Service was not a non-interactive dedicated process.");
         }
 
         if (!string.Equals(
-                identity.ServiceAccountName,
+                accountName,
                 LocalSystemAccountName,
                 StringComparison.OrdinalIgnoreCase))
         {
@@ -148,7 +167,7 @@ internal sealed partial class WindowsSupervisionServerVerifier : ISupervisionSer
                 "The registered ZARA Service account was not LocalSystem.");
         }
 
-        string configuredPath = GetExactConfiguredExecutablePath(identity.ServiceBinaryPath);
+        string configuredPath = GetExactConfiguredExecutablePath(binaryPath);
         if (!string.Equals(
                 configuredPath,
                 Path.GetFullPath(expectedServicePath),

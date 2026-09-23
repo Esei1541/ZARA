@@ -508,6 +508,26 @@ public sealed class WindowsSupervisionConnectionTests
                 RestartRequired: true,
                 RecoverLock: false));
 
+    [TestMethod]
+    [DataRow("SERVICE_LAUNCH_TOKEN_REQUIRED", true)]
+    [DataRow("RECOVERY_TOKEN_REQUIRED", true)]
+    [DataRow("INVALID_LAUNCH_TOKEN", false)]
+    public async Task RegistrationRejectionRetainsServiceOwnedLaunchRequirement(string code, bool waitForService)
+    {
+        string pipeName = CreatePipeName();
+        Task server = RunServerAsync(pipeName, async (reader, writer) =>
+        {
+            _ = await WindowsSupervisionConnection.ReadMessageAsync<SupervisionRequest>(reader, CancellationToken.None);
+            await WindowsSupervisionConnection.WriteMessageAsync(writer,
+                new SupervisionResponse(SupervisionProtocol.CurrentVersion, SupervisionResponseKind.Rejected, 0, false, code),
+                CancellationToken.None);
+        });
+        SupervisionRegistrationException exception = await Assert.ThrowsExactlyAsync<SupervisionRegistrationException>(
+            () => ConnectAsync(pipeName));
+        await server;
+        Assert.AreEqual(code, exception.ErrorCode);
+        Assert.AreEqual(waitForService, exception.RequiresServiceDesktop);
+    }
     private static SupervisionLease CreateInitialLease() =>
         new(
             Revision: 0,
