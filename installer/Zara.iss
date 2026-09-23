@@ -41,9 +41,17 @@ SetupMutex=ZARA.Installation
 Uninstallable=yes
 DisableReadyPage=no
 SetupLogging=yes
+LicenseFile=Terms.ko.txt
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
+
+[Messages]
+WizardLicense=이용약관
+LicenseLabel=설치하기 전에 다음 이용약관과 주의사항을 읽어 주십시오.
+LicenseLabel3=본 이용약관과 주의사항을 읽고 이해했으며, 이에 동의하는 경우 '동의합니다'를 선택하십시오. 동의하지 않으면 설치를 진행할 수 없습니다.
+LicenseAccepted=동의합니다.(&A)
+LicenseNotAccepted=동의하지 않습니다.(&D)
 
 [Dirs]
 ; Prepare creates the protected application directory before Inno copies files.
@@ -70,6 +78,16 @@ var
   Completed: Boolean;
   ServiceStarted: Boolean;
   TransactionId: String;
+
+function InitializeSetup: Boolean;
+begin
+  Result := not WizardSilent;
+  if not Result then begin
+    Log('ZARA requires interactive acceptance of the terms. Silent installation is not supported.');
+    SuppressibleMsgBox('이용약관에 직접 동의해야 설치할 수 있습니다. 설치파일을 일반 실행하여 진행하십시오.',
+      mbError, MB_OK, IDOK);
+  end;
+end;
 
 function RunManagement(const ScriptPath, Action: String): Boolean;
 var
