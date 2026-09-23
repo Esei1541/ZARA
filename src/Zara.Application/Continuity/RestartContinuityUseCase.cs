@@ -105,6 +105,11 @@ public sealed class RestartContinuityUseCase : IRestartContinuityUseCase, IDispo
                 return _acknowledgedRelease;
             }
 
+            if (_currentState.LockRequired)
+            {
+                throw new InvalidOperationException("An explicit exit cannot revoke required lock recovery.");
+            }
+
             var release = new RestartContinuityRelease(NextRevision());
             RestartContinuityAcknowledgement acknowledgement =
                 await _port.ReleaseAsync(release, cancellationToken).ConfigureAwait(false);

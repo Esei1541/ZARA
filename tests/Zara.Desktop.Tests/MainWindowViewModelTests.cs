@@ -755,6 +755,7 @@ public sealed class MainWindowViewModelTests
 
         public Task ApplyPolicyLockRequirementAsync(
             bool lockRequired,
+            bool lockRequiredAfterRestart,
             CancellationToken cancellationToken = default)
         {
             AppliedRequirements.Add(lockRequired);

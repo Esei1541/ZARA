@@ -314,6 +314,16 @@ internal sealed class WindowsSupervisionPipeServer
 
                     case SupervisionRequestKind.ReleaseForExplicitExit:
                         ValidateReleaseRequest(request, generationRevision);
+                        if (_lastAcceptedLease?.RecoverLockOnRestart == true)
+                        {
+                            await WriteRejectedAsync(
+                                    channel,
+                                    "LOCK_RECOVERY_REQUIRED",
+                                    serviceCancellationToken)
+                                .ConfigureAwait(false);
+                            break;
+                        }
+
                         SupervisionLease release = request.Lease!;
                         preparedRelease = release;
                         await WriteAcknowledgementAsync(

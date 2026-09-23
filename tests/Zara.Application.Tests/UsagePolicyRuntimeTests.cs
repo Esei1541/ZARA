@@ -9,6 +9,12 @@ public sealed class UsagePolicyRuntimeTests
     private static readonly bool[] ExpectedInitialLockRequirement = [true];
     private static readonly bool[] ExpectedLockThenUnlockRequirements = [true, false];
     private static readonly bool[] ExpectedUnlockThenLockRequirements = [true, false, true];
+    private static readonly bool[] ExpectedEmergencyBoundaryOverlays = [true, false, false, false];
+    private static readonly bool[] ExpectedEmergencyBoundaryRecovery = [true, true, false, true];
+    private static readonly bool[] ExpectedEmergencyBoundaryRelock = [true, false, false, false, true];
+#if DEBUG
+    private static readonly bool[] ExpectedEmergencyThenDevelopmentRequirements = [true, false, false];
+#endif
 
     [TestMethod]
     public async Task InitializeAppliesPersistedLockRequirement()
@@ -92,6 +98,7 @@ public sealed class UsagePolicyRuntimeTests
         Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.HasActiveReservation);
         Assert.AreEqual(emergencyUnlockActive, runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
         Assert.AreEqual(!emergencyUnlockActive, lockPort.AppliedRequirements.Last());
+        Assert.IsTrue(lockPort.RestartLockRequirements.Last());
         Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.IsSettingsChangeAllowed);
         if (emergencyUnlockActive)
         {
@@ -310,8 +317,9 @@ public sealed class UsagePolicyRuntimeTests
         Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
         Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
         CollectionAssert.AreEqual(
-            ExpectedLockThenUnlockRequirements,
+            ExpectedEmergencyBoundaryOverlays,
             lockPort.AppliedRequirements);
+        CollectionAssert.AreEqual(ExpectedEmergencyBoundaryRecovery, lockPort.RestartLockRequirements);
 
         timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 10, 9, 10, 0, TimeSpan.Zero));
         timeProvider.AdvanceMonotonic(TimeSpan.FromMinutes(8));
@@ -320,7 +328,7 @@ public sealed class UsagePolicyRuntimeTests
         Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
         Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.LockRequired);
         CollectionAssert.AreEqual(
-            ExpectedUnlockThenLockRequirements,
+            ExpectedEmergencyBoundaryRelock,
             lockPort.AppliedRequirements);
     }
 
@@ -791,7 +799,10 @@ public sealed class UsagePolicyRuntimeTests
         Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.IsSettingsChangeAllowed);
         Assert.IsFalse(runtime.CurrentSnapshot.Evaluation.LockRequired);
         Assert.AreEqual(emergencyUnlockActive, runtime.CurrentSnapshot.Evaluation.HasActiveEmergencyUnlock);
-        CollectionAssert.AreEqual(ExpectedLockThenUnlockRequirements, lockPort.AppliedRequirements);
+        CollectionAssert.AreEqual(
+            emergencyUnlockActive ? ExpectedEmergencyThenDevelopmentRequirements : ExpectedLockThenUnlockRequirements,
+            lockPort.AppliedRequirements);
+        Assert.IsFalse(lockPort.RestartLockRequirements.Last());
 
         await runtime.UpdateEmergencyUnlockSettingsAsync(new EmergencyUnlockSettings(18, 0));
         timeProvider.SetUtcNow(new DateTimeOffset(2026, 8, 11, 22, 0, 0, TimeSpan.Zero));
@@ -995,15 +1006,19 @@ public sealed class UsagePolicyRuntimeTests
     {
         public List<bool> AppliedRequirements { get; } = [];
 
+        public List<bool> RestartLockRequirements { get; } = [];
+
         public bool FailWhenLocking { get; set; }
 
         public bool FailWhenUnlocking { get; set; }
 
         public Task ApplyPolicyLockRequirementAsync(
             bool lockRequired,
+            bool lockRequiredAfterRestart,
             CancellationToken cancellationToken = default)
         {
             AppliedRequirements.Add(lockRequired);
+            RestartLockRequirements.Add(lockRequiredAfterRestart);
             if ((lockRequired && FailWhenLocking) || (!lockRequired && FailWhenUnlocking))
             {
                 return Task.FromException(new InvalidOperationException("The lock could not be applied."));

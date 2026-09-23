@@ -21,7 +21,7 @@ public interface IRestartContinuityUseCase
     /// <summary>
     /// Publishes a changed lock condition without deriving it from overlay visibility.
     /// </summary>
-    /// <param name="lockRequired">Whether the current product condition requires the lock.</param>
+    /// <param name="lockRequired">Whether a restarted process must recover the lock.</param>
     /// <param name="cancellationToken">Cancels the pending publish.</param>
     /// <returns>The lease acknowledged by the supervisor.</returns>
     Task<RestartContinuityLease> PublishLockConditionAsync(
@@ -51,7 +51,7 @@ public interface IRestartContinuityUseCase
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Revokes supervision so the process can terminate through the explicit tray-exit command.
+    /// Revokes supervision for a confirmed tray exit only when lock recovery is not required.
     /// </summary>
     /// <param name="cancellationToken">Cancels the pending release before it is acknowledged.</param>
     /// <returns>The release acknowledged by the supervisor.</returns>

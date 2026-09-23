@@ -23,6 +23,7 @@ public sealed class UsagePolicyRuntime : IDisposable
     private long? _emergencyUnlockStartedTimestamp;
     private EmergencyUnlockChallenge? _pendingChallenge;
     private bool? _lastAppliedLockRequirement;
+    private bool? _lastAppliedRestartLockRequirement;
     private int _disposed;
 
     /// <summary>
@@ -83,6 +84,37 @@ public sealed class UsagePolicyRuntime : IDisposable
                 forceLockApply: false,
                 cancellationToken),
             cancellationToken);
+
+    /// <summary>
+    /// Serializes confirmed exit with policy changes and checks time again after cleanup.
+    /// A null final change preserves independent manual-lock and development-safety intentions.
+    /// Callbacks must not re-enter this runtime; exit must initiate shutdown before returning.
+    /// </summary>
+    internal Task ExecuteExitAsync(
+        Func<CancellationToken, Task> prepare,
+        Func<bool?, CancellationToken, Task> exit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(prepare);
+        ArgumentNullException.ThrowIfNull(exit);
+        return ExecuteAsync(
+            async () =>
+            {
+                await SetSettingsAndApplyAsync(
+                    CurrentSnapshot.Settings,
+                    forceLockApply: false,
+                    cancellationToken).ConfigureAwait(false);
+                bool initialRequirement = CurrentSnapshot.Evaluation.LockRequiredAfterRestart;
+                await prepare(cancellationToken).ConfigureAwait(false);
+                cancellationToken.ThrowIfCancellationRequested();
+                bool latestRequirement = CreateSnapshot(CurrentSnapshot.Settings)
+                    .Evaluation.LockRequiredAfterRestart;
+                await exit(
+                    initialRequirement == latestRequirement ? null : latestRequirement,
+                    cancellationToken).ConfigureAwait(false);
+            },
+            cancellationToken);
+    }
 
     /// <summary>
     /// Clears an in-memory emergency unlock and pending prompt when sleep, hibernation, or an
@@ -386,13 +418,18 @@ public sealed class UsagePolicyRuntime : IDisposable
             localNow,
             emergencyUnlockActive);
         bool lockRequirementChanged = forceLockApply ||
-            _lastAppliedLockRequirement != evaluation.LockRequired;
+            _lastAppliedLockRequirement != evaluation.LockRequired ||
+            _lastAppliedRestartLockRequirement != evaluation.LockRequiredAfterRestart;
         if (lockRequirementChanged)
         {
             await _lockPort
-                .ApplyPolicyLockRequirementAsync(evaluation.LockRequired, cancellationToken)
+                .ApplyPolicyLockRequirementAsync(
+                    evaluation.LockRequired,
+                    evaluation.LockRequiredAfterRestart,
+                    cancellationToken)
                 .ConfigureAwait(false);
             _lastAppliedLockRequirement = evaluation.LockRequired;
+            _lastAppliedRestartLockRequirement = evaluation.LockRequiredAfterRestart;
         }
 
         UsagePolicySettings remainingSettings = UsagePolicyEvaluator.RemoveExpiredReservations(

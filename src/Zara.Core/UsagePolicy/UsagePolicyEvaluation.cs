@@ -21,4 +21,11 @@ public sealed record UsagePolicyEvaluation(
     bool HasActiveReservation,
     bool HasActiveEmergencyUnlock,
     bool LockRequired,
-    bool IsSettingsChangeAllowed);
+    bool IsSettingsChangeAllowed)
+{
+    /// <summary>
+    /// Gets whether a restarted process must lock after discarding its in-memory emergency unlock.
+    /// Persisted reservations remain effective after a restart.
+    /// </summary>
+    public bool LockRequiredAfterRestart => IsWithinUsageBan && !HasActiveReservation;
+}
