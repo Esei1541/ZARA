@@ -127,7 +127,7 @@ function Publish-ZaraLocalBuildManifest {
         [Parameter(Mandatory = $true)][string]$BuildDirectory,
         [Parameter(Mandatory = $true)][string]$BuildId,
         [Parameter(Mandatory = $true)][string]$VersionName,
-        [Parameter(Mandatory = $true)][ValidateSet('Debug', 'Staging')][string]$Configuration,
+        [Parameter(Mandatory = $true)][ValidateSet('Debug', 'Staging', 'Release')][string]$Configuration,
         [Parameter(Mandatory = $true)][string]$CreatedAt,
         [Parameter(Mandatory = $true)][string]$Branch,
         [Parameter(Mandatory = $true)][ValidatePattern('^[0-9a-fA-F]{40}$')][string]$Commit,

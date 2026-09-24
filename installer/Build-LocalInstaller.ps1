@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('Debug', 'Staging')]
+    [ValidateSet('Debug', 'Staging', 'Release')]
     [string]$Configuration = 'Staging',
     [string]$BuildsDirectory,
     [string]$IsccPath
@@ -36,8 +36,8 @@ function Invoke-ZaraInstallerPackaging {
         Configuration = $ConfigurationName
         OutputDirectory = $DestinationDirectory
         OutputBaseFileName = $BaseFileName
-        LocalBuildIdentity = $Identity
     }
+    if ($ConfigurationName -ne 'Release') { $parameters.LocalBuildIdentity = $Identity }
     if ($CompilerPath) { $parameters.IsccPath = $CompilerPath }
     & (Join-Path $PSScriptRoot 'Build-Installer.ps1') @parameters | Out-Host
 }

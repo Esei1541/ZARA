@@ -105,9 +105,33 @@ public sealed class WindowsLocalBuildStoreTests
     }
 
     [TestMethod]
-    public async Task FileChangedAfterListingIsRejectedBeforeInstallation()
+    [DataRow("Debug")]
+    [DataRow("Staging")]
+    [DataRow("Release")]
+    public async Task AllBuildConfigurationsCanBeListedAndValidated(string configuration)
+    {
+        LocalBuildManifest build = await AddBuildAsync("candidate", DateTimeOffset.UtcNow);
+        build.Configuration = configuration;
+        await WriteManifestAsync(Path.Combine(_builds, "candidate", "build.json"), build);
+        var store = CreateStore();
+        await store.ChangeDirectoryAsync(_builds);
+
+        LocalBuildEntry entry = (await store.LoadAsync()).Builds.Single();
+
+        Assert.AreEqual(configuration, entry.Build.Configuration);
+        Assert.IsTrue(entry.CanInstall);
+        Assert.AreEqual(Path.Combine(_builds, "candidate", build.InstallerFileName),
+            await store.ValidateInstallerAsync("candidate"));
+    }
+
+    [TestMethod]
+    [DataRow("Staging")]
+    [DataRow("Release")]
+    public async Task FileChangedAfterListingIsRejectedBeforeInstallation(string configuration)
     {
         LocalBuildManifest build = await AddBuildAsync("changed", DateTimeOffset.UtcNow);
+        build.Configuration = configuration;
+        await WriteManifestAsync(Path.Combine(_builds, "changed", "build.json"), build);
         var store = CreateStore();
         await store.ChangeDirectoryAsync(_builds);
         Assert.IsTrue((await store.LoadAsync()).Builds.Single().CanInstall);

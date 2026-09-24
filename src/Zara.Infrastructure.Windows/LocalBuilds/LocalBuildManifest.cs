@@ -35,7 +35,7 @@ internal sealed class LocalBuildManifest
         SchemaVersion == 1 &&
         IsFileName(BuildId) &&
         !string.IsNullOrWhiteSpace(VersionName) &&
-        Configuration is "Debug" or "Staging" &&
+        Configuration is "Debug" or "Staging" or "Release" &&
         CreatedAt != default &&
         !string.IsNullOrWhiteSpace(Branch) &&
         Commit is { Length: 40 } && Commit.All(Uri.IsHexDigit);

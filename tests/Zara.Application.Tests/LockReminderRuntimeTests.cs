@@ -11,12 +11,11 @@ public sealed class LockReminderRuntimeTests
     [TestMethod]
     [DataRow(30, 18, 39)]
     [DataRow(5, 19, 4)]
-    public void Wednesday1910RequestsAndDiagnosesTheExpectedReminder(int minutes, int hour, int minute)
+    public void Wednesday1910RequestsTheExpectedReminder(int minutes, int hour, int minute)
     {
         var clock = new ManualClock(new DateTimeOffset(2026, 9, 23, hour, minute, 59, TimeSpan.Zero));
         var audio = new RecordingAudio();
-        var events = new List<string>();
-        var runtime = new LockReminderRuntime(clock, audio, new LockReminderDiagnostics(events.Add));
+        var runtime = new LockReminderRuntime(clock, audio);
         var policy = new UsagePolicySettings(
             WeeklyUsageRestrictionSchedule.Default.WithRestriction(DayOfWeek.Wednesday,
                 new DailyUsageRestriction(true, new TimeOnly(19, 10), new TimeOnly(23, 0))),
@@ -28,8 +27,6 @@ public sealed class LockReminderRuntimeTests
         Assert.HasCount(1, audio.Requests);
         Assert.AreEqual(minutes, audio.Requests[0]);
         Assert.IsTrue(audio.Callback!());
-        Assert.IsTrue(events.Any(entry => entry.Contains($"due minutes={minutes}", StringComparison.Ordinal)));
-        Assert.IsTrue(events.Any(entry => entry.Contains($"play-request minutes={minutes}", StringComparison.Ordinal)));
         clock.Advance(TimeSpan.FromSeconds(1));
         runtime.Observe(Snapshot(policy, clock), LockReminderSettings.Default);
         Assert.HasCount(1, audio.Requests);
@@ -58,28 +55,14 @@ public sealed class LockReminderRuntimeTests
     }
 
     [TestMethod]
-    public void DiagnosticsDistinguishSlowLoadingFromAudioFailure()
+    public void SlowLoadingDoesNotStartAStaleReminder()
     {
         var clock = new ManualClock();
         var audio = new RecordingAudio();
-        var events = new List<string>();
-        var runtime = new LockReminderRuntime(clock, audio, new LockReminderDiagnostics(events.Add));
+        var runtime = new LockReminderRuntime(clock, audio);
         StartTenMinuteReminder(runtime, clock, audio, CreatePolicy());
         clock.Advance(TimeSpan.FromSeconds(6));
         Assert.IsFalse(audio.Callback!());
-        Assert.IsTrue(events.Any(entry => entry.Contains("reason=media-load-late", StringComparison.Ordinal)));
-        Assert.IsFalse(events.Any(entry => entry.StartsWith("play-failed", StringComparison.Ordinal)));
-    }
-
-    [TestMethod]
-    public void DiagnosticSinkFailureDoesNotPreventAnAnnouncement()
-    {
-        var clock = new ManualClock();
-        var audio = new RecordingAudio();
-        var runtime = new LockReminderRuntime(clock, audio,
-            new LockReminderDiagnostics(_ => throw new IOException("Diagnostic storage unavailable.")));
-        StartTenMinuteReminder(runtime, clock, audio, CreatePolicy());
-        Assert.IsTrue(audio.Callback!());
     }
     [TestMethod]
     public void ChangingReservationsCancelsAudioThatIsStillLoading()

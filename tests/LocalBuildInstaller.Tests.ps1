@@ -54,6 +54,23 @@ Describe 'Local build identity helpers' {
 }
 
 Describe 'Build-LocalInstaller.ps1 completion contract' {
+    It 'registers a Release installer without adding an installed local identity' {
+        $buildId = '260924-141516-1.1.0-release'
+        $buildDirectory = Join-Path $TestDrive $buildId
+        New-Item -ItemType Directory -Path $buildDirectory | Out-Null
+        $installer = Join-Path $buildDirectory ($buildId + '.exe')
+        [IO.File]::WriteAllBytes($installer, [byte[]](1, 2, 3, 4))
+
+        Publish-ZaraLocalBuildManifest -BuildDirectory $buildDirectory -BuildId $buildId `
+            -VersionName '1.1.0' -Configuration Release -CreatedAt '2026-09-24T14:15:16+09:00' `
+            -Branch '260924-release' -Commit ('a' * 40) | Should Be $installer
+
+        $manifest = Get-Content -LiteralPath (Join-Path $buildDirectory 'build.json') -Raw | ConvertFrom-Json
+        $manifest.configuration | Should Be 'Release'
+        $manifest.installerSha256 | Should Be (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+        Test-Path -LiteralPath (Join-Path $buildDirectory 'local-build.json') | Should Be $false
+    }
+
     It 'publishes build.json only after the installer exists with the exact external schema' {
         $buildDirectory = Join-Path $TestDrive 'complete'
         New-Item -ItemType Directory -Path $buildDirectory | Out-Null

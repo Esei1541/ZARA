@@ -617,22 +617,11 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
             if (_usagePolicyRuntime is not null)
             {
                 await _usagePolicyRuntime.RefreshAsync().ConfigureAwait(true);
-                if (_lastReminderRefreshError is not null)
-                {
-                    _lockReminderDiagnostics?.Record("policy-refresh-resumed");
-                    _lastReminderRefreshError = null;
-                }
             }
         }
         catch (Exception exception)
         {
             Trace.TraceError("The usage-policy refresh failed: {0}", exception);
-            string error = exception.ToString();
-            if (_lastReminderRefreshError != error)
-            {
-                _lockReminderDiagnostics?.Record($"policy-refresh-failed error={error}");
-                _lastReminderRefreshError = error;
-            }
         }
         finally
         {
@@ -1040,10 +1029,6 @@ public partial class App : System.Windows.Application, IDisposable, IUsagePolicy
         UnsubscribeUsagePolicyNotifications();
         StopLockReminders();
         _lockReminders = null;
-        _lockReminderDiagnostics?.Record("session-end");
-        _lockReminderLog?.Dispose();
-        _lockReminderLog = null;
-        _lockReminderDiagnostics = null;
         DisposeRecoveryNotifications();
 
         if (_lockRuntime is not null)

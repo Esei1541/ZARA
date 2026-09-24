@@ -9,19 +9,16 @@ public sealed class LockReminderRuntime
     private readonly TimeProvider _timeProvider;
     private readonly ILockReminderAudioPort _audio;
     private readonly LockReminderCoordinator _coordinator;
-    private readonly LockReminderDiagnostics _diagnostics;
     private UsagePolicyRuntimeSnapshot? _snapshot;
     private LockReminderSettings _settings = LockReminderSettings.Default;
     private PendingReminder? _pending;
 
     /// <summary>Creates the reminder runtime for the user's desktop session.</summary>
-    public LockReminderRuntime(TimeProvider timeProvider, ILockReminderAudioPort audio,
-        LockReminderDiagnostics? diagnostics = null)
+    public LockReminderRuntime(TimeProvider timeProvider, ILockReminderAudioPort audio)
     {
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _audio = audio ?? throw new ArgumentNullException(nameof(audio));
-        _diagnostics = diagnostics ?? new();
-        _coordinator = new LockReminderCoordinator(timeProvider, _diagnostics);
+        _coordinator = new LockReminderCoordinator(timeProvider);
     }
 
     /// <summary>Observes the latest policy result on the caller's serialized desktop context.</summary>
@@ -33,8 +30,6 @@ public sealed class LockReminderRuntime
         _settings = settings;
         if (_pending is not null && !IsCurrent(_pending))
         {
-            _diagnostics.Record(FormattableString.Invariant(
-                $"cancelled reason=policy-or-setting-changed minutes={_pending.Minutes} target={_pending.LockStart:O}"));
             Stop();
         }
 
@@ -46,16 +41,17 @@ public sealed class LockReminderRuntime
 
         var pending = new PendingReminder(leadTime, lockStart, _timeProvider.GetTimestamp());
         _pending = pending;
-        _diagnostics.Record(FormattableString.Invariant($"play-request minutes={leadTime} target={lockStart:O}"));
 #pragma warning disable CA1031 // Optional audio must never interrupt lock enforcement.
         try
         {
-            _audio.Play(leadTime, () => CanStartPlayback(pending));
+            _audio.Play(leadTime, () =>
+                IsCurrent(pending) &&
+                // A local clip may take a moment to open, but must not start a stale announcement.
+                _timeProvider.GetElapsedTime(pending.RequestedTimestamp) <= TimeSpan.FromSeconds(5));
         }
         catch (Exception exception)
         {
             Trace.TraceError("The lock reminder could not start: {0}", exception);
-            _diagnostics.Record($"play-failed minutes={leadTime} error={exception}");
             Stop();
         }
 #pragma warning restore CA1031
@@ -71,11 +67,6 @@ public sealed class LockReminderRuntime
     /// <summary>Stops reminder audio without changing the lock policy.</summary>
     public void Stop()
     {
-        if (_pending is not null)
-        {
-            _diagnostics.Record(FormattableString.Invariant(
-                $"stopped minutes={_pending.Minutes} target={_pending.LockStart:O}"));
-        }
         _pending = null;
 #pragma warning disable CA1031 // Cleanup failures in optional audio must not block locking or exit.
         try
@@ -85,23 +76,8 @@ public sealed class LockReminderRuntime
         catch (Exception exception)
         {
             Trace.TraceError("The lock reminder could not stop: {0}", exception);
-            _diagnostics.Record($"stop-failed error={exception}");
         }
 #pragma warning restore CA1031
-    }
-
-    private bool CanStartPlayback(PendingReminder pending)
-    {
-        bool current = IsCurrent(pending);
-        TimeSpan elapsed = _timeProvider.GetElapsedTime(pending.RequestedTimestamp);
-        bool ready = current && elapsed <= TimeSpan.FromSeconds(5);
-        if (!ready)
-        {
-            string reason = current ? "media-load-late" : "policy-or-setting-changed";
-            _diagnostics.Record(FormattableString.Invariant(
-                $"play-cancelled reason={reason} minutes={pending.Minutes} elapsed={elapsed} target={pending.LockStart:O}"));
-        }
-        return ready;
     }
 
     private bool IsCurrent(PendingReminder pending)
