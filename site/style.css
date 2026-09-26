@@ -1,0 +1,71 @@
+:root {
+  color-scheme: dark;
+  font-family: "Malgun Gothic", "Apple SD Gothic Neo", system-ui, sans-serif;
+  line-height: 1.65;
+  background: #0c111a;
+  color: #f4f6fa;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; }
+
+.page { width: min(100% - 2rem, 960px); margin: 0 auto; padding: 3rem 0 4rem; }
+
+.brand { color: #83c4ff; font-size: .8rem; font-weight: 800; letter-spacing: .24em; }
+
+h1, h2, h3 { line-height: 1.35; }
+h1 { margin: .45rem 0 1.25rem; font-size: clamp(2.25rem, 5vw, 3.5rem); }
+h2 { margin: 0 0 1rem; font-size: 1.5rem; }
+h3 { margin: 0 0 .85rem; font-size: 1.12rem; }
+p { margin: .7rem 0; }
+
+.intro { max-width: 720px; margin-bottom: 2.3rem; }
+.intro p { color: #cbd5e2; }
+
+.download-panel, .guide-card, .troubleshooting {
+  border: 1px solid #2b3a4e;
+  border-radius: 16px;
+  background: #151e2b;
+}
+
+.download-panel { padding: clamp(1.25rem, 4vw, 2rem); }
+.download-panel > p:first-of-type { color: #d2deeb; }
+
+button {
+  display: inline-block;
+  min-height: 48px;
+  margin-top: .8rem;
+  padding: .7rem 1.4rem;
+  border: 0;
+  border-radius: 9px;
+  background: #81c4ff;
+  color: #0a1929;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) { background: #acd8ff; }
+button:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+button:disabled { background: #46566a; color: #d4dce5; cursor: not-allowed; }
+
+.status { margin-top: 1rem; padding: .85rem 1rem; border-left: 3px solid #81c4ff; background: #203044; }
+[hidden] { display: none !important; }
+
+.guide, .troubleshooting { margin-top: 2.5rem; }
+.guide-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.guide-card { padding: 1.35rem; }
+.guide-card ol { padding-left: 1.4rem; margin: 0; }
+.guide-card li + li { margin-top: .75rem; }
+.guide-card p { margin-top: .75rem; }
+
+.troubleshooting { padding: clamp(1.25rem, 4vw, 2rem); }
+.troubleshooting ul { margin: 0; padding-left: 1.4rem; }
+.troubleshooting li + li { margin-top: .7rem; }
+
+@media (max-width: 760px) {
+  .page { padding-top: 2rem; }
+  .guide-grid { grid-template-columns: 1fr; }
+  button { width: 100%; }
+}

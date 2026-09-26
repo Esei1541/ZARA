@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>ZARA 잠금 해제</title>
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./recovery.mjs"></script>
+</head>
+<body>
+  <main class="page">
+    <header class="intro">
+      <span class="brand" aria-hidden="true">ZARA</span>
+      <h1>잠금 해제</h1>
+      <p>설정 실수나 원치 않는 설치로 PC가 잠겼다면 복구 파일로 잠금을 해제할 수 있습니다.</p>
+    </header>
+
+    <section class="download-panel" aria-labelledby="download-heading">
+      <h2 id="download-heading">복구 파일 다운로드</h2>
+      <p>PC의 잠금 해제 안내 창을 열어둔 상태에서 진행해주세요.</p>
+      <button id="download" type="button">복구 파일 다운로드</button>
+      <p id="download-status" class="status" role="status" aria-live="polite" hidden></p>
+    </section>
+
+    <section class="guide" aria-labelledby="guide-heading">
+      <h2 id="guide-heading">연결 방법</h2>
+      <div class="guide-grid">
+        <article class="guide-card">
+          <h3>USB 메모리</h3>
+          <ol>
+            <li>복구 파일을 USB 메모리에 저장해주세요. USB 메모리를 열었을 때 바로 보이는 위치에 파일이 있어야 합니다.</li>
+            <li>USB 메모리를 잠긴 PC에 연결해주세요.</li>
+            <li>PC에 해제 확인 창이 나타나면 내용을 확인하고 ‘잠금 해제’를 눌러주세요.</li>
+          </ol>
+        </article>
+        <article class="guide-card">
+          <h3>Android</h3>
+          <ol>
+            <li>복구 파일을 휴대폰의 다운로드 폴더에 저장해주세요.</li>
+            <li>휴대폰의 잠금을 풀고 데이터 전송이 가능한 USB 케이블로 잠긴 PC에 연결해주세요.</li>
+            <li>휴대폰의 USB 연결 알림에서 ‘파일 전송’을 선택해주세요.<br>파일 접근 허용을 묻는 안내가 나오면 허용해주세요.</li>
+            <li>PC에 해제 확인 창이 나타나면 내용을 확인하고 ‘잠금 해제’를 눌러주세요.</li>
+          </ol>
+        </article>
+        <article class="guide-card">
+          <h3>iPhone</h3>
+          <p>iPhone을 PC에 USB로 직접 연결하는 방식은 지원하지 않습니다.</p>
+          <p>복구 파일을 별도 USB 메모리에 옮긴 뒤 위의 USB 메모리 안내를 따라 진행해주세요.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="troubleshooting" aria-labelledby="troubleshooting-heading">
+      <h2 id="troubleshooting-heading">파일이 인식되지 않나요?</h2>
+      <ul>
+        <li>PC의 잠금 해제 안내 창을 닫았다면 다시 열고, 새 QR 코드로 파일을 다시 받아주세요.</li>
+        <li>USB 메모리를 열었을 때 복구 파일이 바로 보이는지 확인해주세요.</li>
+        <li>휴대폰의 다운로드 폴더에 복구 파일이 있는지 확인해주세요.</li>
+        <li>휴대폰의 잠금을 풀고 USB 연결 설정이 ‘파일 전송’인지 확인해주세요.</li>
+        <li>충전만 가능한 USB 케이블은 사용할 수 없습니다. 데이터 전송이 가능한 케이블로 연결해주세요.</li>
+        <li>장치를 분리했다가 다시 연결해주세요.</li>
+        <li>다운로드가 시작되지 않으면 ‘복구 파일 다운로드’를 다시 눌러주세요.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
