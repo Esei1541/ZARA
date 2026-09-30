@@ -8,10 +8,15 @@ namespace Zara.Desktop;
 /// </summary>
 public partial class ReservationEditorDialog : Window
 {
-    private readonly ReservationEditorViewModel _viewModel = new();
+    private readonly ReservationEditorViewModel _viewModel;
 
-    public ReservationEditorDialog()
+    public ReservationEditorDialog() : this(null)
     {
+    }
+
+    internal ReservationEditorDialog(ReservationDraft? initialDraft)
+    {
+        _viewModel = new ReservationEditorViewModel(initialDraft);
         InitializeComponent();
         DataContext = _viewModel;
     }

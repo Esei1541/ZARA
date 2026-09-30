@@ -35,7 +35,7 @@
                   IsCancel="True" Content="×" AutomationProperties.Name="닫기" />
         </Grid>
 
-        <TextBlock Text="날짜" FontWeight="SemiBold" Margin="0,0,0,8" />
+        <TextBlock Text="시작 날짜" FontWeight="SemiBold" Margin="0,0,0,8" />
         <DatePicker x:Name="ReservationDatePicker"
                     Style="{StaticResource Zara.DatePicker}"
                     HorizontalAlignment="Stretch"
@@ -90,7 +90,7 @@
                   CornerRadius="8"
                   Padding="14">
             <StackPanel>
-              <TextBlock Text="종료 시각" Style="{StaticResource Zara.SecondaryText}" Margin="0,0,0,10" />
+              <TextBlock x:Name="EndTimeLabel" Text="{Binding EndTimeLabel}" Style="{StaticResource Zara.SecondaryText}" Margin="0,0,0,10" />
               <StackPanel Orientation="Horizontal">
                 <TextBox Width="55"
                          MaxLength="2"

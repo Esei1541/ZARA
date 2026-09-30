@@ -470,6 +470,89 @@ public sealed class UsagePolicyEvaluatorTests
         Assert.AreSame(removed.Settings, missing.Settings);
     }
 
+    [TestMethod]
+    [DataRow(0, 22, 0, 23, 30, false)]
+    [DataRow(0, 23, 0, 0, 30, true)]
+    [DataRow(1, 0, 0, 0, 30, true)]
+    [DataRow(1, 0, 30, 2, 0, true)]
+    [DataRow(1, 1, 0, 2, 0, false)]
+    [DataRow(2, 0, 0, 1, 0, false)]
+    public void OvernightOverlapChecksBothStartDatesInEitherOrder(
+        int dayOffset, int startHour, int startMinute, int endHour, int endMinute, bool overlaps)
+    {
+        var overnight = Reservation(new DateOnly(2026, 9, 30), new TimeOnly(23, 30), new TimeOnly(1, 0));
+        var candidate = Reservation(overnight.Date.AddDays(dayOffset),
+            new TimeOnly(startHour, startMinute), new TimeOnly(endHour, endMinute));
+        ReservationChangeStatus expected = overlaps
+            ? ReservationChangeStatus.ConflictsWithExisting : ReservationChangeStatus.Added;
+
+        Assert.AreEqual(expected, UsagePolicyEvaluator.TryAddReservation(
+            SettingsWithReservations(overnight), candidate).Status);
+        Assert.AreEqual(expected, UsagePolicyEvaluator.TryAddReservation(
+            SettingsWithReservations(candidate), overnight).Status);
+        if (overlaps)
+        {
+            _ = Assert.ThrowsExactly<ArgumentException>(() => SettingsWithReservations(overnight, candidate));
+        }
+    }
+
+    [TestMethod]
+    [DataRow(-1, false)]
+    [DataRow(0, true)]
+    [DataRow(1, true)]
+    public void OvernightCleanupUsesTheFollowingDateAndExactEndBoundary(int tickOffset, bool expired)
+    {
+        var reservation = Reservation(new DateOnly(2026, 9, 30), new TimeOnly(23, 30), new TimeOnly(1, 0));
+        UsagePolicySettings settings = SettingsWithReservations(reservation);
+
+        Assert.HasCount(1, UsagePolicyEvaluator.RemoveExpiredReservations(
+            settings, new DateTime(2026, 10, 1)).Reservations);
+        UsagePolicySettings remaining = UsagePolicyEvaluator.RemoveExpiredReservations(
+            settings, new DateTime(2026, 10, 1, 1, 0, 0).AddTicks(tickOffset));
+        Assert.HasCount(expired ? 0 : 1, remaining.Reservations);
+    }
+
+    [TestMethod]
+    public void OvernightReservationDefersActualLockUntilItsFollowingDayEnd()
+    {
+        var reservation = Reservation(new DateOnly(2026, 8, 10), new TimeOnly(23, 0), new TimeOnly(1, 0));
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(23, 0), new TimeOnly(5, 0)), reservation);
+
+        Assert.AreEqual(new DateTime(2026, 8, 11, 1, 0, 0), UsagePolicyEvaluator.FindNextLockStart(
+            settings, new DateTime(2026, 8, 10, 22, 0, 0)));
+        UsagePolicyEvaluation afterMidnight = UsagePolicyEvaluator.Evaluate(
+            settings, new DateTime(2026, 8, 11), isEmergencyUnlockActive: false);
+        Assert.IsTrue(afterMidnight.HasActiveReservation);
+        Assert.IsFalse(afterMidnight.LockRequired);
+        Assert.IsFalse(afterMidnight.IsSettingsChangeAllowed);
+    }
+
+    [TestMethod]
+    public void AdjacentReservationsAcrossMidnightDeferLockUntilTheLastEnd()
+    {
+        var overnight = Reservation(new DateOnly(2026, 8, 10), new TimeOnly(23, 0), new TimeOnly(1, 0));
+        var following = Reservation(new DateOnly(2026, 8, 11), new TimeOnly(1, 0), new TimeOnly(2, 0));
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(23, 0), new TimeOnly(5, 0)), overnight, following);
+
+        Assert.AreEqual(new DateTime(2026, 8, 11, 2, 0, 0), UsagePolicyEvaluator.FindNextLockStart(
+            settings, new DateTime(2026, 8, 10, 22, 0, 0)));
+        Assert.IsFalse(UsagePolicyEvaluator.Evaluate(settings, new DateTime(2026, 8, 11, 1, 0, 0),
+            isEmergencyUnlockActive: false).LockRequired);
+    }
+
+    [TestMethod]
+    public void OvernightReservationCanEndAtTheRestrictionReleaseWithoutAnotherLock()
+    {
+        var reservation = Reservation(new DateOnly(2026, 8, 10), new TimeOnly(23, 0), new TimeOnly(5, 0));
+        UsagePolicySettings settings = SettingsWithMondayRestriction(
+            new DailyUsageRestriction(true, new TimeOnly(23, 0), new TimeOnly(5, 0)), reservation);
+
+        Assert.AreEqual(new DateTime(2026, 8, 17, 23, 0, 0), UsagePolicyEvaluator.FindNextLockStart(
+            settings, new DateTime(2026, 8, 10, 22, 0, 0)));
+    }
+
     private static UsagePolicySettings SettingsWithMondayRestriction(
         DailyUsageRestriction monday,
         params OutOfHoursReservation[] reservations) =>

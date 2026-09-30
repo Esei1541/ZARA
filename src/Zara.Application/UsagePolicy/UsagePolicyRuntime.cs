@@ -57,6 +57,16 @@ public sealed class UsagePolicyRuntime : IDisposable
     /// </summary>
     public UsagePolicyRuntimeSnapshot CurrentSnapshot => Volatile.Read(ref _currentSnapshot);
 
+    /// <summary>Gets a one-hour reservation default from the saved schedule and fresh local time.</summary>
+    public (DateOnly Date, TimeOnly StartTime, TimeOnly EndTime) GetReservationDefaultInterval()
+    {
+        DateTime localNow = GetCurrentLocalTime();
+        DateTime start = UsagePolicyEvaluator.FindNextRestrictionStart(
+            CurrentSnapshot.Settings.WeeklySchedule, localNow) ?? localNow.Date;
+        TimeOnly startTime = TimeOnly.FromDateTime(start);
+        return (DateOnly.FromDateTime(start), startTime, startTime.AddHours(1));
+    }
+
     /// <summary>
     /// Loads persisted settings, discarding any emergency state from an earlier app process, and
     /// applies the initial lock decision.

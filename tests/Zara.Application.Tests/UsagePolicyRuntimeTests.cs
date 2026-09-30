@@ -1300,6 +1300,91 @@ public sealed class UsagePolicyRuntimeTests
         Assert.AreEqual(1, store.Settings.EmergencyUnlockUsage.UsedCount);
     }
 
+    [TestMethod]
+    [DataRow(2026, 9, 30, 21, DayOfWeek.Thursday, 0, 0, 2026, 10, 1)]
+    [DataRow(2026, 9, 30, 21, DayOfWeek.Wednesday, 22, 0, 2026, 9, 30)]
+    [DataRow(2026, 9, 30, 23, DayOfWeek.Wednesday, 22, 0, 2026, 10, 7)]
+    [DataRow(2026, 12, 31, 21, DayOfWeek.Friday, 0, 0, 2027, 1, 1)]
+    [DataRow(2026, 9, 30, 21, DayOfWeek.Wednesday, 23, 30, 2026, 9, 30)]
+    public async Task ReservationDefaultUsesTheNearestSavedScheduleStart(
+        int year, int month, int day, int hour, DayOfWeek restrictionDay,
+        int startHour, int startMinute, int expectedYear, int expectedMonth, int expectedDay)
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(year, month, day, hour, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(CreateSettings(restrictionDay,
+            new TimeOnly(startHour, startMinute), new TimeOnly(5, 0)));
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+
+        var interval = runtime.GetReservationDefaultInterval();
+
+        Assert.AreEqual(new DateOnly(expectedYear, expectedMonth, expectedDay), interval.Date);
+        Assert.AreEqual(new TimeOnly(startHour, startMinute), interval.StartTime);
+        Assert.AreEqual(interval.StartTime.AddHours(1), interval.EndTime);
+        Assert.AreEqual(0, store.SaveCount);
+    }
+
+    [TestMethod]
+    public async Task ReservationDefaultReadsFreshTimeWithoutMovingToAnExistingReservationEnd()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 30, 21, 0, 0, TimeSpan.Zero));
+        var reservation = new OutOfHoursReservation(Guid.NewGuid(), new DateOnly(2026, 10, 1),
+            TimeOnly.MinValue, new TimeOnly(1, 0), string.Empty);
+        var store = new RecordingStore(CreateSettings(DayOfWeek.Thursday,
+            TimeOnly.MinValue, new TimeOnly(5, 0), reservations: [reservation]));
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+
+        Assert.AreEqual(new DateTime(2026, 10, 1, 1, 0, 0), runtime.CurrentSnapshot.NextLockStartLocalTime);
+        Assert.AreEqual(TimeOnly.MinValue, runtime.GetReservationDefaultInterval().StartTime);
+        clock.SetUtcNow(new DateTimeOffset(2026, 10, 1, 6, 0, 0, TimeSpan.Zero));
+        Assert.AreEqual(new DateOnly(2026, 10, 8), runtime.GetReservationDefaultInterval().Date);
+    }
+
+    [TestMethod]
+    public async Task ReservationDefaultWithoutEnabledDaysRetainsTodayAndMidnight()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 30, 21, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(UsagePolicySettings.Default);
+        using var runtime = CreateRuntime(store, new RecordingLockPort(), new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+
+        var interval = runtime.GetReservationDefaultInterval();
+
+        Assert.AreEqual(new DateOnly(2026, 9, 30), interval.Date);
+        Assert.AreEqual(TimeOnly.MinValue, interval.StartTime);
+        Assert.AreEqual(new TimeOnly(1, 0), interval.EndTime);
+    }
+
+    [TestMethod]
+    public async Task OvernightReservationSurvivesMidnightAndRestartThenExpiresAndRelocks()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 9, 30, 22, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(CreateSettings(DayOfWeek.Wednesday, new TimeOnly(23, 30), new TimeOnly(5, 0)));
+        var lockPort = new RecordingLockPort();
+        using var runtime = CreateRuntime(store, lockPort, new RecordingPromptCatalog(), clock);
+        await runtime.InitializeAsync();
+        var reservation = new OutOfHoursReservation(Guid.NewGuid(), new DateOnly(2026, 9, 30),
+            new TimeOnly(23, 30), new TimeOnly(0, 30), string.Empty);
+        Assert.AreEqual(ReservationChangeStatus.Added, await runtime.AddReservationAsync(reservation));
+        clock.SetUtcNow(new DateTimeOffset(2026, 10, 1, 0, 0, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+        Assert.HasCount(1, store.Settings.Reservations);
+        Assert.IsTrue(runtime.CurrentSnapshot.Evaluation.HasActiveReservation);
+        Assert.IsFalse(lockPort.AppliedRequirements[^1]);
+
+        var restartedLockPort = new RecordingLockPort();
+        using var restarted = CreateRuntime(store, restartedLockPort, new RecordingPromptCatalog(), clock);
+        await restarted.InitializeAsync();
+        Assert.IsTrue(restarted.CurrentSnapshot.Evaluation.HasActiveReservation);
+        Assert.IsFalse(restartedLockPort.AppliedRequirements[^1]);
+        Assert.AreEqual(new DateTime(2026, 10, 1, 0, 30, 0), restarted.CurrentSnapshot.NextLockStartLocalTime);
+        clock.SetUtcNow(new DateTimeOffset(2026, 10, 1, 0, 30, 0, TimeSpan.Zero));
+        await restarted.RefreshAsync();
+        Assert.IsEmpty(store.Settings.Reservations);
+        Assert.IsTrue(restartedLockPort.AppliedRequirements[^1]);
+    }
+
     private static UsagePolicySettings CreateWeeklyLimitedSettings(int sentences = 0, int maximum = 3) =>
         CreateSettings(DayOfWeek.Monday, new TimeOnly(21, 0), new TimeOnly(7, 0), sentences)
             .WithEmergencyUnlock(new EmergencyUnlockSettings(10, sentences, true, DayOfWeek.Sunday, maximum));

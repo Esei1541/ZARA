@@ -299,6 +299,13 @@ internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDis
         private set => SetField(ref _usagePolicyStatusMessage, value);
     }
 
+    /// <summary>Creates the initial form values without registering a reservation.</summary>
+    internal ReservationDraft CreateReservationDraft()
+    {
+        var interval = RequireUsagePolicyRuntime().GetReservationDefaultInterval();
+        return new ReservationDraft(interval.Date, interval.StartTime, interval.EndTime, string.Empty);
+    }
+
     /// <summary>
     /// Converts a completed reservation dialog result into a Core reservation and delegates the
     /// add operation to the runtime.

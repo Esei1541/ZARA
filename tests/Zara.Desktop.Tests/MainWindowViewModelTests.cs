@@ -1095,6 +1095,29 @@ public sealed class MainWindowViewModelTests
             _ => throw new ArgumentOutOfRangeException(nameof(minutes)),
         };
 
+    [STATestMethod]
+    public async Task ReservationDefaultsUseSavedSettingsWithoutOverwritingTheOpenForm()
+    {
+        var clock = new ManualTimeProvider(new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero));
+        var store = new RecordingStore(SettingsWithMondayRestriction(new TimeOnly(23, 30), new TimeOnly(5, 0)));
+        using var runtime = CreateRuntime(store, clock);
+        await runtime.InitializeAsync();
+        using var main = CreateViewModel(runtime);
+        main.WeekdayRestrictions.Single(day => day.DayOfWeek == DayOfWeek.Monday).StartTime.Set(new TimeOnly(22, 0));
+        var editor = new ReservationEditorViewModel(main.CreateReservationDraft());
+        Assert.AreEqual(new DateTime(2026, 8, 10), editor.SelectedDate);
+        Assert.AreEqual("23:30", editor.StartTime.DisplayTime);
+        editor.EndTime.Set(new TimeOnly(1, 30));
+        clock.SetUtcNow(new DateTimeOffset(2026, 8, 11, 6, 0, 0, TimeSpan.Zero));
+        await runtime.RefreshAsync();
+        Assert.AreEqual("01:30", editor.EndTime.DisplayTime);
+        Assert.AreEqual(new DateTime(2026, 8, 10), editor.SelectedDate);
+        ReservationDraft reopened = main.CreateReservationDraft();
+        Assert.AreEqual(new DateOnly(2026, 8, 17), reopened.Date);
+        Assert.AreEqual(new TimeOnly(23, 30), reopened.StartTime);
+        Assert.AreEqual(new TimeOnly(0, 30), reopened.EndTime);
+    }
+
     private static UsagePolicyRuntime CreateRuntime(
         RecordingStore store,
         TimeProvider timeProvider,
