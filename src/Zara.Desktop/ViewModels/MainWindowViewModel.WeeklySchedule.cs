@@ -28,9 +28,11 @@ internal sealed partial class MainWindowViewModel
         get => _selectedWeekday;
         set
         {
-            if (value is not null && SetField(ref _selectedWeekday, value))
+            if (value is not null)
             {
-                _revertWeekdayCommand?.NotifyCanExecuteChanged();
+                SetField(ref _selectedWeekday, value);
+                IsBulkScheduleSelected = false;
+                NotifyScheduleEditorSelection();
             }
         }
     }
@@ -38,6 +40,11 @@ internal sealed partial class MainWindowViewModel
     public bool CanEditWeeklySchedule => CanChangeUsagePolicySettings && !_isSavingWeeklySchedule;
     public bool HasWeeklyScheduleChanges => WeekdayRestrictions.Any(day => day.HasChanges);
     public bool IsWeeklyScheduleConfirmationVisible => _pendingWeeklySchedule is not null;
+    public string WeeklyScheduleConfirmationSummary => _pendingWeeklySchedule is null
+        ? string.Empty
+        : string.Join(Environment.NewLine, WeekdayRestrictions
+            .Where(day => day.HasChanges)
+            .Select(day => day.DraftSummary));
     public bool WillLockImmediately => _willLockImmediately;
     public string WeeklyScheduleImpact => _weeklyScheduleImpact;
     public string WeeklyScheduleValidationMessage => _weeklyScheduleValidationMessage;
@@ -68,6 +75,7 @@ internal sealed partial class MainWindowViewModel
             {
                 _pendingWeeklySchedule = candidate;
                 OnPropertyChanged(nameof(IsWeeklyScheduleConfirmationVisible));
+                OnPropertyChanged(nameof(WeeklyScheduleConfirmationSummary));
                 return;
             }
 
@@ -102,6 +110,7 @@ internal sealed partial class MainWindowViewModel
             }
 
             _loadedWeeklySchedule = schedule;
+            BulkScheduleEditor.Reset(schedule.GetRestriction(SelectedWeekday.DayOfWeek));
         }
         finally
         {
@@ -113,6 +122,7 @@ internal sealed partial class MainWindowViewModel
     {
         _pendingWeeklySchedule = null;
         OnPropertyChanged(nameof(IsWeeklyScheduleConfirmationVisible));
+        OnPropertyChanged(nameof(WeeklyScheduleConfirmationSummary));
         _confirmWeeklyScheduleCommand?.NotifyCanExecuteChanged();
     }
 
@@ -156,6 +166,9 @@ internal sealed partial class MainWindowViewModel
     private void UpdateWeeklyScheduleCommands()
     {
         OnPropertyChanged(nameof(CanEditWeeklySchedule));
+        OnPropertyChanged(nameof(CanEditScheduleTime));
+        _selectBulkScheduleCommand?.NotifyCanExecuteChanged();
+        _applyBulkScheduleCommand?.NotifyCanExecuteChanged();
         _saveWeeklyScheduleCommand?.NotifyCanExecuteChanged();
         _revertWeekdayCommand?.NotifyCanExecuteChanged();
         _discardWeeklyScheduleCommand?.NotifyCanExecuteChanged();

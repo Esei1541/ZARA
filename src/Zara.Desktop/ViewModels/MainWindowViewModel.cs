@@ -84,6 +84,17 @@ internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDis
             new(DayOfWeek.Sunday, "일요일"),
         ]);
         _selectedWeekday = WeekdayRestrictions[0];
+        BulkScheduleEditor = new BulkUsageRestrictionViewModel(
+            WeekdayRestrictions.Select(day => KeyValuePair.Create(day.DayOfWeek, day.DisplayName)));
+        BulkScheduleEditor.Edited += OnBulkScheduleEdited;
+        _selectBulkScheduleCommand = new AsyncCommand(
+            () => { IsBulkScheduleSelected = true; return Task.CompletedTask; },
+            ReportWeeklyScheduleFailure,
+            () => CanEditWeeklySchedule);
+        _applyBulkScheduleCommand = new AsyncCommand(
+            ApplyBulkScheduleAsync,
+            ReportWeeklyScheduleFailure,
+            CanApplyBulkSchedule);
         foreach (DailyUsageRestrictionViewModel editor in WeekdayRestrictions)
         {
             editor.Edited += OnWeeklyScheduleEdited;
@@ -92,7 +103,7 @@ internal sealed partial class MainWindowViewModel : INotifyPropertyChanged, IDis
         _revertWeekdayCommand = new AsyncCommand(
             () => { SelectedWeekday.Revert(); return Task.CompletedTask; },
             ReportWeeklyScheduleFailure,
-            () => CanEditWeeklySchedule && SelectedWeekday.HasChanges);
+            () => CanEditWeeklySchedule && !IsBulkScheduleSelected && SelectedWeekday.HasChanges);
         _discardWeeklyScheduleCommand = new AsyncCommand(
             () => { ResetWeeklyScheduleEdits(); return Task.CompletedTask; },
             ReportWeeklyScheduleFailure,
