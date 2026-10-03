@@ -127,7 +127,7 @@
                         IsChecked="{Binding SelectedWeekday.IsRestrictionEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                         Visibility="{Binding IsWeekdayScheduleSelected, Converter={StaticResource BooleanVisibility}}"
                         Style="{StaticResource Zara.CheckBox}" />
-              <CheckBox x:Name="ActivateBulkWeekdaysCheckBox" Grid.Column="1" Content="적용 후 전체 활성화" HorizontalAlignment="Right"
+              <CheckBox x:Name="ActivateBulkWeekdaysCheckBox" Grid.Column="1" Content="적용 후 활성화" HorizontalAlignment="Right"
                         IsChecked="{Binding BulkScheduleEditor.ActivateAfterApply, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                         Visibility="{Binding IsBulkScheduleSelected, Converter={StaticResource BooleanVisibility}}"
                         Style="{StaticResource Zara.CheckBox}" />
