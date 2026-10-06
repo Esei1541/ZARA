@@ -8,16 +8,20 @@ namespace Zara.Desktop.ViewModels;
 /// </summary>
 internal sealed class ReservationEditorViewModel : INotifyPropertyChanged
 {
-    private DateTime? _selectedDate = DateTime.Today;
+    private DateTime? _selectedDate;
     private string _memo = string.Empty;
 
-    /// <summary>Initializes the dialog with the current date and midnight-to-one-hour interval.</summary>
-    public ReservationEditorViewModel()
+    /// <summary>Initializes form values once, leaving subsequent edits under the user's control.</summary>
+    public ReservationEditorViewModel(ReservationDraft? initialDraft = null)
     {
+        _selectedDate = initialDraft?.Date.ToDateTime(TimeOnly.MinValue) ?? DateTime.Today;
+        _memo = initialDraft?.Memo ?? string.Empty;
         StartTime = new TimeSelectionViewModel(use24HourClock: true);
         EndTime = new TimeSelectionViewModel(use24HourClock: true);
-        StartTime.Set(TimeOnly.MinValue);
-        EndTime.Set(new TimeOnly(1, 0));
+        StartTime.Set(initialDraft?.StartTime ?? TimeOnly.MinValue);
+        EndTime.Set(initialDraft?.EndTime ?? new TimeOnly(1, 0));
+        StartTime.PropertyChanged += OnTimeChanged;
+        EndTime.PropertyChanged += OnTimeChanged;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -44,6 +48,12 @@ internal sealed class ReservationEditorViewModel : INotifyPropertyChanged
     /// <summary>Gets the end-time controls.</summary>
     public TimeSelectionViewModel EndTime { get; }
 
+    /// <summary>Names the end field and indicates a following-day end for valid input.</summary>
+    public string EndTimeLabel => StartTime.IsValid && EndTime.IsValid &&
+        EndTime.ToTimeOnly() < StartTime.ToTimeOnly()
+            ? "종료 시각 (다음 날)"
+            : "종료 시각";
+
     /// <summary>Gets or sets the user-visible memo.</summary>
     public string Memo
     {
@@ -61,7 +71,7 @@ internal sealed class ReservationEditorViewModel : INotifyPropertyChanged
     }
 
     /// <summary>
-    /// Validates the dialog fields and creates a raw result. Same-day interval validation remains
+    /// Validates the dialog fields and creates a raw result. Interval validation remains
     /// the responsibility of the Core reservation constructor.
     /// </summary>
     /// <param name="draft">The completed raw result when every dialog field is valid.</param>
@@ -92,6 +102,14 @@ internal sealed class ReservationEditorViewModel : INotifyPropertyChanged
         {
             validationMessage = exception.Message;
             return false;
+        }
+    }
+
+    private void OnTimeChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TimeSelectionViewModel.DisplayTime))
+        {
+            OnPropertyChanged(nameof(EndTimeLabel));
         }
     }
 

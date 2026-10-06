@@ -41,6 +41,9 @@ internal sealed class DailyUsageRestrictionViewModel : INotifyPropertyChanged
 
     public string EditorTitle => DisplayName;
     public string SavedSummary => FormatRestriction(_savedRestriction);
+    public string CurrentSummary => TryGetRestriction(out DailyUsageRestriction? rule)
+        ? FormatRestriction(rule!)
+        : "입력값 확인 필요";
     public string SavedDescription => $"현재 설정: {SavedSummary}";
     public string ChangeStatus => HasChanges ? "편집 중 · 저장 전" : "적용 중";
     public string EndDay => GetEndDay(StartTime.IsValid && ReleaseTime.IsValid &&
@@ -188,6 +191,24 @@ internal sealed class DailyUsageRestrictionViewModel : INotifyPropertyChanged
 
     internal void Revert() => Load(_savedRestriction);
 
+    internal void ApplyDraft(DailyUsageRestriction restriction)
+    {
+        ArgumentNullException.ThrowIfNull(restriction);
+        _loading = true;
+        try
+        {
+            IsRestrictionEnabled = restriction.IsEnabled;
+            StartTime.Set(restriction.StartTime);
+            ReleaseTime.Set(restriction.ReleaseTime);
+        }
+        finally
+        {
+            _loading = false;
+        }
+
+        NotifyEdit();
+    }
+
     private bool TryGetRestriction(out DailyUsageRestriction? rule)
     {
         try
@@ -237,6 +258,7 @@ internal sealed class DailyUsageRestrictionViewModel : INotifyPropertyChanged
 
         OnPropertyChanged(nameof(HasChanges));
         OnPropertyChanged(nameof(ChangeStatus));
+        OnPropertyChanged(nameof(CurrentSummary));
         OnPropertyChanged(nameof(DraftSummary));
         OnPropertyChanged(nameof(EndDay));
         OnPropertyChanged(nameof(ValidationMessage));

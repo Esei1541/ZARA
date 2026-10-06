@@ -197,7 +197,7 @@ public partial class MainWindow : Window
 
     private async void AddReservation_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new ReservationEditorDialog
+        var dialog = new ReservationEditorDialog(_viewModel.CreateReservationDraft())
         {
             Owner = this,
         };

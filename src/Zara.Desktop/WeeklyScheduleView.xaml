@@ -8,6 +8,44 @@
         <ResourceDictionary Source="Styles/SettingsStyles.xaml" />
       </ResourceDictionary.MergedDictionaries>
       <BooleanToVisibilityConverter x:Key="BooleanVisibility" />
+      <SolidColorBrush x:Key="BulkBackground" Color="#F1EEFE" />
+      <SolidColorBrush x:Key="BulkSelectedBackground" Color="#E4DDF8" />
+      <SolidColorBrush x:Key="BulkBorder" Color="#D3C8F0" />
+      <SolidColorBrush x:Key="BulkAccent" Color="#65518D" />
+      <Style x:Key="BulkNavigationButton" TargetType="ToggleButton">
+        <Setter Property="Background" Value="{StaticResource BulkBackground}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BulkBorder}" />
+        <Setter Property="Foreground" Value="{StaticResource Zara.Brush.Text}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Padding" Value="13,14" />
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Template">
+          <Setter.Value>
+            <ControlTemplate TargetType="ToggleButton">
+              <Border x:Name="Chrome" Background="{TemplateBinding Background}"
+                      BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                      CornerRadius="{StaticResource Zara.Radius.Control}" Padding="{TemplateBinding Padding}">
+                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" />
+              </Border>
+              <ControlTemplate.Triggers>
+                <Trigger Property="IsChecked" Value="True">
+                  <Setter TargetName="Chrome" Property="Background" Value="{StaticResource BulkSelectedBackground}" />
+                  <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource BulkAccent}" />
+                </Trigger>
+                <Trigger Property="IsMouseOver" Value="True">
+                  <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource BulkAccent}" />
+                </Trigger>
+                <Trigger Property="IsKeyboardFocused" Value="True">
+                  <Setter TargetName="Chrome" Property="BorderThickness" Value="2" />
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                  <Setter TargetName="Chrome" Property="Opacity" Value="0.55" />
+                </Trigger>
+              </ControlTemplate.Triggers>
+            </ControlTemplate>
+          </Setter.Value>
+        </Setter>
+      </Style>
     </ResourceDictionary>
   </UserControl.Resources>
   <Grid Background="{StaticResource Zara.Brush.Background}"
@@ -30,8 +68,22 @@
         <StackPanel>
           <TextBlock Text="사용 금지 시간대 설정" Style="{StaticResource Zara.SectionTitle}" />
           <TextBlock Text="요일에 따라 일정을 설정합니다." Margin="0,4,0,14" Style="{StaticResource Zara.SecondaryText}" />
+          <RadioButton x:Name="BulkScheduleButton" Style="{StaticResource BulkNavigationButton}"
+                        IsChecked="{Binding IsBulkScheduleSelected, Mode=OneWay}"
+                        Command="{Binding SelectBulkScheduleCommand}"
+                        AutomationProperties.Name="한 번에 적용">
+            <Grid>
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <StackPanel>
+                <TextBlock Text="한 번에 적용" FontWeight="SemiBold" />
+                <TextBlock Text="여러 요일을 한 번에 설정" Style="{StaticResource Zara.SecondaryText}" Margin="0,3,0,0" />
+              </StackPanel>
+              <TextBlock Grid.Column="1" Text="›" Foreground="{StaticResource BulkAccent}" VerticalAlignment="Center" Margin="10,0,0,0" />
+            </Grid>
+          </RadioButton>
+          <Border BorderBrush="{StaticResource Zara.Brush.Border}" BorderThickness="0,1,0,0" Margin="0,14,0,14" />
           <ListBox x:Name="WeekdayList" ItemsSource="{Binding WeekdayRestrictions}"
-                   SelectedItem="{Binding SelectedWeekday, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                   SelectedItem="{Binding SelectedWeekdayListItem, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                    ItemContainerStyle="{StaticResource Zara.DayItem}"
                    Background="Transparent" BorderThickness="0" Padding="0"
                    ScrollViewer.HorizontalScrollBarVisibility="Disabled"
@@ -58,7 +110,7 @@
                   </Grid.ColumnDefinitions>
                   <TextBlock Text="{Binding DisplayName}" Margin="0,0,10,0" />
                   <StackPanel Grid.Column="1">
-                    <TextBlock Text="{Binding SavedSummary}" TextWrapping="Wrap" />
+                    <TextBlock Text="{Binding CurrentSummary}" TextWrapping="Wrap" />
                     <TextBlock Text="{Binding ChangeStatus}" Style="{StaticResource Zara.SecondaryText}" Margin="0,4,0,0" />
                   </StackPanel>
                 </Grid>
@@ -69,19 +121,52 @@
         <Border Grid.Column="2" Style="{StaticResource Zara.Panel}" Padding="18" VerticalAlignment="Top">
           <StackPanel>
             <Grid>
-              <TextBlock Text="{Binding SelectedWeekday.EditorTitle}" Style="{StaticResource Zara.Heading}" FontSize="16" LineHeight="24" />
-              <CheckBox x:Name="EnabledCheckBox" Content="활성화" HorizontalAlignment="Right"
+              <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+              <TextBlock Text="{Binding ScheduleEditorTitle}" Style="{StaticResource Zara.Heading}" FontSize="16" LineHeight="24" Margin="0,0,8,0" />
+              <CheckBox x:Name="EnabledCheckBox" Grid.Column="1" Content="활성화" HorizontalAlignment="Right"
                         IsChecked="{Binding SelectedWeekday.IsRestrictionEnabled, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        Visibility="{Binding IsWeekdayScheduleSelected, Converter={StaticResource BooleanVisibility}}"
+                        Style="{StaticResource Zara.CheckBox}" />
+              <CheckBox x:Name="ActivateBulkWeekdaysCheckBox" Grid.Column="1" Content="적용 후 활성화" HorizontalAlignment="Right"
+                        IsChecked="{Binding BulkScheduleEditor.ActivateAfterApply, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                        Visibility="{Binding IsBulkScheduleSelected, Converter={StaticResource BooleanVisibility}}"
                         Style="{StaticResource Zara.CheckBox}" />
             </Grid>
-            <DockPanel Margin="0,14">
+            <StackPanel Visibility="{Binding IsBulkScheduleSelected, Converter={StaticResource BooleanVisibility}}">
+              <TextBlock Text="선택한 요일에 같은 시간대를 설정합니다." Style="{StaticResource Zara.SecondaryText}" Margin="0,5,0,20" TextWrapping="Wrap" />
+              <StackPanel DataContext="{Binding BulkScheduleEditor}">
+                <DockPanel Margin="0,0,0,10">
+                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Content="전체 선택" Command="{Binding SelectAllCommand}" Style="{StaticResource Zara.Button}" Padding="5,3" FontSize="12" Margin="0,0,5,0" />
+                    <Button Content="선택 해제" Command="{Binding ClearSelectionCommand}" Style="{StaticResource Zara.Button}" Padding="5,3" FontSize="12" />
+                  </StackPanel>
+                  <WrapPanel VerticalAlignment="Center">
+                    <TextBlock Text="적용할 요일" />
+                    <TextBlock Text="{Binding SelectionSummary}" Style="{StaticResource Zara.SecondaryText}" Margin="7,0,0,0" />
+                  </WrapPanel>
+                </DockPanel>
+                <ItemsControl x:Name="BulkWeekdayTargets" ItemsSource="{Binding Targets}">
+                  <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="7" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <ToggleButton Content="{Binding ShortName}" IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    Style="{StaticResource Zara.TimeButton}" Padding="0,10" Margin="0,0,4,0"
+                                    HorizontalContentAlignment="Center" AutomationProperties.Name="{Binding DisplayName}" />
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+              <Border BorderBrush="{StaticResource Zara.Brush.Border}" BorderThickness="0,1,0,0" Margin="0,20,0,20" />
+            </StackPanel>
+            <DockPanel Margin="0,14" Visibility="{Binding IsWeekdayScheduleSelected, Converter={StaticResource BooleanVisibility}}">
               <Button x:Name="RevertButton" DockPanel.Dock="Right" Content="되돌리기"
                       Command="{Binding RevertWeekdayCommand}" Style="{StaticResource Zara.Button}" Padding="9,5" FontSize="12"
                       AutomationProperties.Name="선택한 요일을 저장값으로 되돌리기" />
               <TextBlock Text="{Binding SelectedWeekday.SavedDescription}" VerticalAlignment="Center"
                          TextWrapping="Wrap" Margin="0,0,8,0" Style="{StaticResource Zara.SecondaryText}" />
             </DockPanel>
-            <StackPanel DataContext="{Binding SelectedWeekday}" IsEnabled="{Binding IsRestrictionEnabled}">
+            <StackPanel DataContext="{Binding ActiveScheduleTimeEditor}"
+                        IsEnabled="{Binding DataContext.CanEditScheduleTime, RelativeSource={RelativeSource AncestorType=UserControl}}">
               <Grid>
                 <Grid.ColumnDefinitions>
                   <ColumnDefinition Width="*" />
@@ -141,6 +226,12 @@
                          LostKeyboardFocus="TimeInput_LostKeyboardFocus" />
               </StackPanel>
             </StackPanel>
+            <StackPanel Visibility="{Binding IsBulkScheduleSelected, Converter={StaticResource BooleanVisibility}}">
+              <TextBlock Text="{Binding BulkScheduleEditor.ValidationMessage}" Style="{StaticResource Zara.ErrorText}" Margin="0,10,0,0" />
+              <Button x:Name="ApplyBulkScheduleButton" Content="{Binding BulkScheduleEditor.ApplyButtonText}"
+                      Command="{Binding ApplyBulkScheduleCommand}" Style="{StaticResource Zara.PrimaryButton}"
+                      HorizontalAlignment="Right" Margin="0,14,0,0" />
+            </StackPanel>
             <TextBlock Text="{Binding WeeklyScheduleValidationMessage}" Style="{StaticResource Zara.ErrorText}" Margin="0,10,0,0" />
             <Border BorderBrush="{StaticResource Zara.Brush.Border}" BorderThickness="0,1,0,0" Margin="0,18,0,0" Padding="0,16,0,0">
               <StackPanel>
@@ -171,7 +262,9 @@
       <StackPanel>
         <TextBlock Text="적용 시 바로 잠김" Foreground="{StaticResource Zara.Brush.Danger}" FontWeight="Bold" />
         <TextBlock Text="현재 시각이 잠금 시각에 포함되어 있습니다. 설정 시 즉시 잠금이 실행됩니다." Margin="0,6,0,12" TextWrapping="Wrap" />
-        <TextBlock Text="{Binding SelectedWeekday.DraftSummary}" TextWrapping="Wrap" Margin="0,0,0,12" />
+        <ScrollViewer MaxHeight="63" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="0,0,0,12">
+          <TextBlock Text="{Binding WeeklyScheduleConfirmationSummary}" TextWrapping="Wrap" />
+        </ScrollViewer>
         <StackPanel Orientation="Horizontal">
           <Button Content="계속 편집" Command="{Binding CancelWeeklyScheduleConfirmationCommand}" Style="{StaticResource Zara.Button}" Margin="0,0,8,0" />
           <Button x:Name="ConfirmSaveButton" Content="저장하고 지금 잠금" Command="{Binding ConfirmWeeklyScheduleCommand}" Style="{StaticResource Zara.PrimaryButton}" />

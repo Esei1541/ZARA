@@ -31,7 +31,7 @@ public static class UsagePolicyEvaluator
             settings.WeeklySchedule,
             localNow);
         bool hasActiveOutOfHoursReservation = settings.Reservations.Any(
-            reservation => Contains(reservation, localNow));
+            reservation => reservation.Contains(localNow));
         bool isLockRequired = isBaseUsageRestrictionActive &&
             !hasActiveOutOfHoursReservation &&
             !isEmergencyUnlockActive;
@@ -89,7 +89,7 @@ public static class UsagePolicyEvaluator
         }
 
         DateTime[] reservationEndCandidates = settings.Reservations
-            .Select(reservation => reservation.Date.ToDateTime(reservation.EndTime, localNow.Kind))
+            .Select(reservation => DateTime.SpecifyKind(reservation.GetEndLocalTime(), localNow.Kind))
             .Where(candidate => candidate > localNow)
             .OrderBy(candidate => candidate)
             .ToArray();
@@ -146,7 +146,7 @@ public static class UsagePolicyEvaluator
     /// a currently configured weekday restriction.
     /// </summary>
     /// <param name="settings">The current immutable settings snapshot.</param>
-    /// <param name="reservation">The same-day reservation to add.</param>
+    /// <param name="reservation">The reservation to add.</param>
     /// <returns>The changed snapshot or the unchanged snapshot with a conflict status.</returns>
     public static ReservationChangeResult TryAddReservation(
         UsagePolicySettings settings,
@@ -208,17 +208,17 @@ public static class UsagePolicyEvaluator
         ArgumentNullException.ThrowIfNull(settings);
 
         if (!settings.Reservations.Any(reservation =>
-                reservation.Date.ToDateTime(reservation.EndTime) <= localNow))
+                reservation.GetEndLocalTime() <= localNow))
         {
             return settings;
         }
 
         return settings.WithReservations(settings.Reservations.Where(reservation =>
-            reservation.Date.ToDateTime(reservation.EndTime) > localNow));
+            reservation.GetEndLocalTime() > localNow));
     }
 
     /// <summary>
-    /// Determines whether two same-day reservations share at least one included instant.
+    /// Determines whether two reservations share at least one included instant across either date.
     /// </summary>
     /// <remarks>
     /// Intervals use an inclusive start and exclusive end, so adjacent reservations do not overlap.
@@ -228,9 +228,8 @@ public static class UsagePolicyEvaluator
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);
 
-        return left.Date == right.Date &&
-            left.StartTime < right.EndTime &&
-            right.StartTime < left.EndTime;
+        return left.GetStartLocalTime() < right.GetEndLocalTime() &&
+            right.GetStartLocalTime() < left.GetEndLocalTime();
     }
 
     private static DateTime? Earliest(
@@ -252,10 +251,13 @@ public static class UsagePolicyEvaluator
         return earliest;
     }
 
-    private static DateTime? FindNextRestrictionStart(
+    /// <summary>Finds the next enabled weekly restriction start strictly after the supplied time.</summary>
+    /// <remarks>Reservations and emergency unlocks do not move the scheduled start.</remarks>
+    public static DateTime? FindNextRestrictionStart(
         WeeklyUsageRestrictionSchedule schedule,
         DateTime after)
     {
+        ArgumentNullException.ThrowIfNull(schedule);
         DateTime firstDate = after.Date;
         for (int dayOffset = 0; dayOffset <= 7; dayOffset++)
         {
@@ -325,9 +327,4 @@ public static class UsagePolicyEvaluator
             previous.StartTime > previous.ReleaseTime &&
             currentTime < previous.ReleaseTime;
     }
-
-    private static bool Contains(OutOfHoursReservation reservation, DateTime localNow) =>
-        reservation.Date == DateOnly.FromDateTime(localNow) &&
-        TimeOnly.FromDateTime(localNow) >= reservation.StartTime &&
-        TimeOnly.FromDateTime(localNow) < reservation.EndTime;
 }

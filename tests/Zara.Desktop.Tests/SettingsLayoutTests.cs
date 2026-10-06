@@ -170,6 +170,40 @@ public sealed class SettingsLayoutTests
     }
 
     [STATestMethod]
+    public void OvernightReservationTimeRangeRemainsVisibleAtMinimumWindowWidth()
+    {
+        var window = CreateWindow();
+        var viewModel = (MainWindowViewModel)window.DataContext;
+        var reservation = new ReservationRowViewModel(new OutOfHoursReservation(Guid.NewGuid(),
+            new DateOnly(2026, 9, 30), new TimeOnly(23, 30), new TimeOnly(0, 30), string.Empty));
+        viewModel.Reservations.Add(reservation);
+        try
+        {
+            window.Width = 820;
+            window.MainTabs.SelectedIndex = 3;
+            window.Show();
+            window.UpdateLayout();
+            var row = (DataGridRow)window.ReservationGrid.ItemContainerGenerator.ContainerFromItem(reservation);
+            var text = (TextBlock)window.ReservationTimeColumn.GetCellContent(reservation);
+            Assert.AreEqual("23:30 → 다음 날 00:30", text.Text);
+            var formatted = new FormattedText(text.Text, CultureInfo.GetCultureInfo("ko-KR"),
+                FlowDirection.LeftToRight, new Typeface(text.FontFamily, text.FontStyle, text.FontWeight, text.FontStretch),
+                text.FontSize, Brushes.Black, VisualTreeHelper.GetDpi(text).PixelsPerDip)
+            {
+                MaxTextWidth = text.ActualWidth,
+            };
+            Assert.IsGreaterThanOrEqualTo(formatted.Height - 0.5, text.ActualHeight);
+            Rect bounds = text.TransformToAncestor(row).TransformBounds(new Rect(text.RenderSize));
+            Assert.IsTrue(bounds.Left >= 0 && bounds.Right <= row.ActualWidth);
+            Assert.IsTrue(bounds.Top >= 0 && bounds.Bottom <= row.ActualHeight);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [STATestMethod]
     public void TimeInputsDoNotApplyPaddingTwice()
     {
         var window = CreateWindow();

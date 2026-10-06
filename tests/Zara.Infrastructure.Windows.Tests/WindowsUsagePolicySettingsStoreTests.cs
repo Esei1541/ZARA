@@ -7,6 +7,7 @@ namespace Zara.Infrastructure.Windows.Tests;
 [TestClass]
 public sealed class WindowsUsagePolicySettingsStoreTests
 {
+    private static readonly string[] ReservationFieldNames = ["id", "date", "startTime", "endTime", "memo"];
     private string _settingsDirectoryPath = null!;
 
     [TestInitialize]
@@ -44,6 +45,29 @@ public sealed class WindowsUsagePolicySettingsStoreTests
         AssertSettingsEqual(expected, actual);
         Assert.IsTrue(File.Exists(GetSettingsFilePath()));
         Assert.IsTrue(File.Exists(GetLastKnownGoodFilePath()));
+    }
+
+    [TestMethod]
+    public async Task OvernightAndSameDayReservationsRoundTripWithoutChangingStoredFields()
+    {
+        var sameDay = new OutOfHoursReservation(Guid.NewGuid(), new DateOnly(2026, 9, 30),
+            new TimeOnly(0, 0), new TimeOnly(1, 0), "기존 예약");
+        var overnight = new OutOfHoursReservation(Guid.NewGuid(), new DateOnly(2026, 9, 30),
+            new TimeOnly(23, 30), new TimeOnly(0, 30), string.Empty);
+        UsagePolicySettings expected = UsagePolicySettings.Default.WithReservations([sameDay, overnight]);
+        using (var store = new WindowsUsagePolicySettingsStore(_settingsDirectoryPath))
+        {
+            await store.SaveAsync(expected);
+        }
+        JsonObject document = await ReadDocumentAsync();
+        JsonObject persisted = document["reservations"]!.AsArray()[1]!.AsObject();
+        CollectionAssert.AreEquivalent(ReservationFieldNames,
+            persisted.Select(field => field.Key).ToArray());
+        using var restarted = new WindowsUsagePolicySettingsStore(_settingsDirectoryPath);
+        UsagePolicySettings loaded = await restarted.LoadAsync();
+        AssertSettingsEqual(expected, loaded);
+        Assert.IsTrue(loaded.Reservations[1].Contains(new DateTime(2026, 10, 1)));
+        Assert.AreEqual(new DateTime(2026, 10, 1, 0, 30, 0), loaded.Reservations[1].GetEndLocalTime());
     }
 
     [TestMethod]

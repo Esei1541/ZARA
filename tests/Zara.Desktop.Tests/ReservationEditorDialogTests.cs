@@ -19,6 +19,34 @@ public sealed class ReservationEditorDialogTests
     ];
 
     [STATestMethod]
+    public void SuppliedDefaultsReachTheDateAndTimeControlsAndFollowingDayLabel()
+    {
+        var initial = new ViewModels.ReservationDraft(new DateOnly(2026, 10, 1),
+            new TimeOnly(23, 30), new TimeOnly(0, 30), string.Empty);
+        var dialog = new ReservationEditorDialog(initial) { Left = -10_000, Top = -10_000, ShowActivated = false };
+        try
+        {
+            dialog.Show();
+            dialog.UpdateLayout();
+            Assert.AreEqual(new DateTime(2026, 10, 1), dialog.ReservationDatePicker.SelectedDate);
+            Assert.AreEqual("종료 시각 (다음 날)", dialog.EndTimeLabel.Text);
+            TextBox[] inputs = FindLogicalDescendants<TextBox>(dialog).ToArray();
+            Assert.AreEqual("23", inputs.Single(input => AutomationProperties.GetName(input) == "시작 시각 시간").Text);
+            Assert.AreEqual("30", inputs.Single(input => AutomationProperties.GetName(input) == "시작 시각 분").Text);
+            Assert.AreEqual("00", inputs.Single(input => AutomationProperties.GetName(input) == "종료 시각 시간").Text);
+            Assert.AreEqual("30", inputs.Single(input => AutomationProperties.GetName(input) == "종료 시각 분").Text);
+            var viewModel = (ViewModels.ReservationEditorViewModel)dialog.DataContext;
+            viewModel.EndTime.Set(new TimeOnly(23, 45));
+            dialog.Dispatcher.Invoke(() => { }, DispatcherPriority.DataBind);
+            Assert.AreEqual("종료 시각", dialog.EndTimeLabel.Text);
+        }
+        finally
+        {
+            dialog.Close();
+        }
+    }
+
+    [STATestMethod]
     public void EveryTimeTextBoxUsesTheDigitsOnlyBehavior()
     {
         var dialog = new ReservationEditorDialog();
@@ -38,24 +66,34 @@ public sealed class ReservationEditorDialogTests
     [STATestMethod]
     public void ReservationFormUsesTwentyFourHourLabelsAndGuidance()
     {
-        var dialog = new ReservationEditorDialog();
-        string[] visibleTexts = FindLogicalDescendants<TextBlock>(dialog)
-            .Select(textBlock => textBlock.Text)
-            .ToArray();
+        var dialog = new ReservationEditorDialog { Left = -10_000, Top = -10_000, ShowActivated = false };
+        try
+        {
+            dialog.Show();
+            dialog.UpdateLayout();
+            string[] visibleTexts = FindLogicalDescendants<TextBlock>(dialog)
+                .Select(textBlock => textBlock.Text)
+                .ToArray();
 
-        Assert.AreEqual("예약 추가", dialog.Title);
-        CollectionAssert.Contains(visibleTexts, "시작 시각");
-        CollectionAssert.Contains(visibleTexts, "종료 시각");
-        CollectionAssert.Contains(
-            visibleTexts,
-            "시각은 24시간을 기준으로 입력해주세요. (예: 오후 07:30 → 19:30)");
-        Assert.IsFalse(FindLogicalDescendants<ComboBox>(dialog).Any());
+            Assert.AreEqual("예약 추가", dialog.Title);
+            CollectionAssert.Contains(visibleTexts, "시작 날짜");
+            CollectionAssert.Contains(visibleTexts, "시작 시각");
+            CollectionAssert.Contains(visibleTexts, "종료 시각");
+            CollectionAssert.Contains(
+                visibleTexts,
+                "시각은 24시간을 기준으로 입력해주세요. (예: 오후 07:30 → 19:30)");
+            Assert.IsFalse(FindLogicalDescendants<ComboBox>(dialog).Any());
 
-        TextBox[] hourInputs = FindLogicalDescendants<TextBox>(dialog)
-            .Where(textBox => AutomationProperties.GetName(textBox) is "시작 시각 시간" or "종료 시각 시간")
-            .ToArray();
-        Assert.HasCount(2, hourInputs);
-        Assert.IsTrue(hourInputs.All(textBox => AutomationProperties.GetHelpText(textBox) == "0부터 23까지 입력"));
+            TextBox[] hourInputs = FindLogicalDescendants<TextBox>(dialog)
+                .Where(textBox => AutomationProperties.GetName(textBox) is "시작 시각 시간" or "종료 시각 시간")
+                .ToArray();
+            Assert.HasCount(2, hourInputs);
+            Assert.IsTrue(hourInputs.All(textBox => AutomationProperties.GetHelpText(textBox) == "0부터 23까지 입력"));
+        }
+        finally
+        {
+            dialog.Close();
+        }
     }
 
     [STATestMethod]
